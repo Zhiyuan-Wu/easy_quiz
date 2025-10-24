@@ -1,0 +1,5 @@
+__pycache__
+uploads
+question_database.db
+.env
+*.png
