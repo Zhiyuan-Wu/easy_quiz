@@ -5,13 +5,18 @@
 
 # 数据库配置
 DATABASE_PATH = "question_database.db"
+USER_DATABASE_PATH = "users.db"
+
+# Session配置
+SECRET_KEY = "your-secret-key-change-this-in-production"
 
 # 大语言模型配置
 LLM_CONFIG = {
     "api_url": "https://api.deepseek.com",  # 替换为实际的API地址
     "api_key": "sk-7027575dc0a64e3e9c726fe39195cc31",  # 替换为实际的API密钥
     "model": "deepseek-chat",  # 或使用其他模型
-    "temperature": 0.7
+    "temperature": 0.7,
+    "max_tokens": 4000
 }
 
 # 题目标签配置

@@ -39,21 +39,36 @@ class QuestionManager:
                 reference_answer TEXT,
                 source TEXT,
                 image TEXT,  -- JSON格式存储图片路径列表
+                user_id INTEGER,  -- 上传用户ID
+                visibility TEXT DEFAULT 'public',  -- 可见范围: public(所有人), private(仅自己)
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
+        # 检查是否需要添加新字段（用于数据库升级）
+        cursor.execute("PRAGMA table_info(questions)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        if 'user_id' not in columns:
+            cursor.execute('ALTER TABLE questions ADD COLUMN user_id INTEGER')
+        
+        if 'visibility' not in columns:
+            cursor.execute("ALTER TABLE questions ADD COLUMN visibility TEXT DEFAULT 'public'")
+        
         # 创建索引
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tags ON questions(tags)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_source ON questions(source)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_id ON questions(user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_visibility ON questions(visibility)')
         
         conn.commit()
         conn.close()
     
     def add_question(self, latex_content: str, tags: List[str] = None, 
                     reference_answer: str = None, source: str = None, 
-                    image: List[str] = None) -> int:
+                    image: List[str] = None, user_id: int = None, 
+                    visibility: str = 'public') -> int:
         """
         添加题目到数据库
         
@@ -83,9 +98,9 @@ class QuestionManager:
         
         try:
             cursor.execute('''
-                INSERT INTO questions (latex_content, tags, reference_answer, source, image)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (latex_content, tags_json, reference_answer, source, image_json))
+                INSERT INTO questions (latex_content, tags, reference_answer, source, image, user_id, visibility)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (latex_content, tags_json, reference_answer, source, image_json, user_id, visibility))
             
             question_id = cursor.lastrowid
             conn.commit()
@@ -97,12 +112,13 @@ class QuestionManager:
         finally:
             conn.close()
     
-    def get_questions_by_tags(self, tags: List[str]) -> List[Dict]:
+    def get_questions_by_tags(self, tags: List[str], current_user_id: int = None) -> List[Dict]:
         """
-        根据标签查询题目
+        根据标签查询题目（考虑可见性）
         
         Args:
             tags: 要查询的标签列表
+            current_user_id: 当前用户ID
             
         Returns:
             匹配的题目列表
@@ -121,7 +137,11 @@ class QuestionManager:
             conditions.append("tags LIKE ?")
             params.append(f'%"{tag}"%')
         
-        query = f"SELECT * FROM questions WHERE {' OR '.join(conditions)} ORDER BY created_at DESC"
+        # 添加可见性条件
+        visibility_condition = "(visibility = 'public' OR user_id = ?)"
+        params.append(current_user_id)
+        
+        query = f"SELECT * FROM questions WHERE ({' OR '.join(conditions)}) AND {visibility_condition} ORDER BY created_at DESC"
         
         cursor.execute(query, params)
         rows = cursor.fetchall()
@@ -130,61 +150,48 @@ class QuestionManager:
         # 转换为字典格式
         questions = []
         for row in rows:
-            question = {
-                'id': row[0],
-                'latex_content': row[1],
-                'tags': json.loads(row[2]),
-                'reference_answer': row[3],
-                'source': row[4],
-                'image': json.loads(row[5]) if row[5] else [],
-                'created_at': row[6],
-                'updated_at': row[7]
-            }
+            question = self._row_to_dict(row)
             questions.append(question)
         
         return questions
     
-    def get_question_by_id(self, question_id: int) -> Optional[Dict]:
+    def get_question_by_id(self, question_id: int, current_user_id: int = None) -> Optional[Dict]:
         """
-        根据ID获取题目详情
+        根据ID获取题目详情（考虑可见性）
         
         Args:
             question_id: 题目ID
+            current_user_id: 当前用户ID
             
         Returns:
-            题目信息字典，如果不存在返回None
+            题目信息字典，如果不存在或无权访问返回None
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute('SELECT * FROM questions WHERE id = ?', (question_id,))
+        cursor.execute('''
+            SELECT * FROM questions 
+            WHERE id = ? AND (visibility = 'public' OR user_id = ?)
+        ''', (question_id, current_user_id))
         row = cursor.fetchone()
         conn.close()
         
         if row:
-            return {
-                'id': row[0],
-                'latex_content': row[1],
-                'tags': json.loads(row[2]),
-                'reference_answer': row[3],
-                'source': row[4],
-                'image': json.loads(row[5]) if row[5] else [],
-                'created_at': row[6],
-                'updated_at': row[7]
-            }
+            return self._row_to_dict(row)
         return None
     
-    def get_reference_answer(self, question_id: int) -> Optional[str]:
+    def get_reference_answer(self, question_id: int, current_user_id: int = None) -> Optional[str]:
         """
-        获取题目的参考解答
+        获取题目的参考解答（考虑可见性）
         
         Args:
             question_id: 题目ID
+            current_user_id: 当前用户ID
             
         Returns:
-            参考解答，如果不存在返回None
+            参考解答，如果不存在或无权访问返回None
         """
-        question = self.get_question_by_id(question_id)
+        question = self.get_question_by_id(question_id, current_user_id)
         return question['reference_answer'] if question else None
     
     def auto_tag_and_answer(self, latex_content: str, source: str = None) -> Tuple[List[str], str]:
@@ -366,12 +373,13 @@ class QuestionManager:
             print(f"解析试卷失败: {e}")
             return []
     
-    def delete_question(self, question_id: int) -> bool:
+    def delete_question(self, question_id: int, current_user_id: int = None) -> bool:
         """
-        删除题目
+        删除题目（只能删除自己的题目）
         
         Args:
             question_id: 题目ID
+            current_user_id: 当前用户ID
             
         Returns:
             是否删除成功
@@ -380,7 +388,7 @@ class QuestionManager:
         cursor = conn.cursor()
         
         try:
-            cursor.execute('DELETE FROM questions WHERE id = ?', (question_id,))
+            cursor.execute('DELETE FROM questions WHERE id = ? AND user_id = ?', (question_id, current_user_id))
             conn.commit()
             return cursor.rowcount > 0
         except Exception as e:
@@ -389,13 +397,14 @@ class QuestionManager:
         finally:
             conn.close()
     
-    def get_all_questions(self, limit: int = 100, offset: int = 0) -> List[Dict]:
+    def get_all_questions(self, limit: int = 100, offset: int = 0, current_user_id: int = None) -> List[Dict]:
         """
-        获取所有题目（分页）
+        获取所有题目（分页，考虑可见性）
         
         Args:
             limit: 每页数量
             offset: 偏移量
+            current_user_id: 当前用户ID
             
         Returns:
             题目列表
@@ -405,35 +414,28 @@ class QuestionManager:
         
         cursor.execute('''
             SELECT * FROM questions 
+            WHERE visibility = 'public' OR user_id = ?
             ORDER BY created_at DESC 
             LIMIT ? OFFSET ?
-        ''', (limit, offset))
+        ''', (current_user_id, limit, offset))
         
         rows = cursor.fetchall()
         conn.close()
         
         questions = []
         for row in rows:
-            question = {
-                'id': row[0],
-                'latex_content': row[1],
-                'tags': json.loads(row[2]),
-                'reference_answer': row[3],
-                'source': row[4],
-                'image': json.loads(row[5]) if row[5] else [],
-                'created_at': row[6],
-                'updated_at': row[7]
-            }
+            question = self._row_to_dict(row)
             questions.append(question)
         
         return questions
     
-    def search_questions(self, keyword: str) -> List[Dict]:
+    def search_questions(self, keyword: str, current_user_id: int = None) -> List[Dict]:
         """
-        根据关键词搜索题目
+        根据关键词搜索题目（考虑可见性）
         
         Args:
             keyword: 搜索关键词
+            current_user_id: 当前用户ID
             
         Returns:
             匹配的题目列表
@@ -443,25 +445,67 @@ class QuestionManager:
         
         cursor.execute('''
             SELECT * FROM questions 
-            WHERE latex_content LIKE ? OR source LIKE ?
+            WHERE (latex_content LIKE ? OR source LIKE ?)
+            AND (visibility = 'public' OR user_id = ?)
             ORDER BY created_at DESC
-        ''', (f'%{keyword}%', f'%{keyword}%'))
+        ''', (f'%{keyword}%', f'%{keyword}%', current_user_id))
         
         rows = cursor.fetchall()
         conn.close()
         
         questions = []
         for row in rows:
-            question = {
-                'id': row[0],
-                'latex_content': row[1],
-                'tags': json.loads(row[2]),
-                'reference_answer': row[3],
-                'source': row[4],
-                'image': json.loads(row[5]) if row[5] else [],
-                'created_at': row[6],
-                'updated_at': row[7]
-            }
+            question = self._row_to_dict(row)
             questions.append(question)
         
         return questions
+    
+    def get_question_stats(self, current_user_id: int = None) -> Dict:
+        """
+        获取题目统计信息
+        
+        Args:
+            current_user_id: 当前用户ID
+            
+        Returns:
+            统计信息字典
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # 总题目数（可见的）
+        cursor.execute('''
+            SELECT COUNT(*) FROM questions 
+            WHERE visibility = 'public' OR user_id = ?
+        ''', (current_user_id,))
+        total = cursor.fetchone()[0]
+        
+        # 我的题目数
+        cursor.execute('SELECT COUNT(*) FROM questions WHERE user_id = ?', (current_user_id,))
+        my_questions = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        return {
+            'total': total,
+            'my_questions': my_questions
+        }
+    
+    def _row_to_dict(self, row) -> Dict:
+        """将数据库行转换为字典"""
+        if not row:
+            return None
+        
+        # 处理不同长度的行（用于数据库升级兼容）
+        return {
+            'id': row[0],
+            'latex_content': row[1],
+            'tags': json.loads(row[2]),
+            'reference_answer': row[3],
+            'source': row[4],
+            'image': json.loads(row[5]) if row[5] else [],
+            'user_id': row[6] if len(row) > 6 else None,
+            'visibility': row[7] if len(row) > 7 else 'public',
+            'created_at': row[8] if len(row) > 8 else row[6],
+            'updated_at': row[9] if len(row) > 9 else row[7]
+        }

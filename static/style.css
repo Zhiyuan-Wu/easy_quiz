@@ -14,32 +14,115 @@ body {
 }
 
 .container {
-    max-width: 1200px;
+    max-width: 1400px;
     margin: 0 auto;
     padding: 20px;
 }
 
-/* 头部样式 */
-.header {
-    text-align: center;
-    color: #333;
-    margin-bottom: 30px;
+/* 状态栏样式 */
+.status-bar {
     background: white;
-    padding: 40px 20px;
+    padding: 20px 30px;
     border-radius: 15px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 15px;
 }
 
-.header h1 {
-    font-size: 2.5rem;
+.status-left h1 {
+    font-size: 1.8rem;
     font-weight: 600;
-    margin-bottom: 10px;
     color: #2c3e50;
+    margin: 0;
 }
 
-.header p {
-    font-size: 1.1rem;
+.status-left h1 i {
+    margin-right: 10px;
+    color: #3498db;
+}
+
+.status-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.status-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     color: #666;
+    font-size: 0.95rem;
+}
+
+.status-item i {
+    color: #3498db;
+}
+
+.status-item strong {
+    color: #333;
+    font-weight: 600;
+}
+
+.cart-icon {
+    position: relative;
+    cursor: pointer;
+    padding: 10px 15px;
+    background: #3498db;
+    border-radius: 8px;
+    color: white;
+    transition: all 0.3s ease;
+}
+
+.cart-icon:hover {
+    background: #2980b9;
+    transform: translateY(-2px);
+}
+
+.cart-icon i {
+    font-size: 1.2rem;
+    color: white;
+}
+
+.cart-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background: #e74c3c;
+    color: white;
+    border-radius: 50%;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.btn-logout {
+    padding: 8px 15px;
+    background: #e74c3c;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-logout:hover {
+    background: #c0392b;
+    transform: translateY(-2px);
 }
 
 /* 导航标签 */
@@ -215,8 +298,6 @@ textarea {
     cursor: pointer;
     transition: all 0.3s ease;
     text-decoration: none;
-    margin-right: 10px;
-    margin-bottom: 10px;
 }
 
 .btn i {
@@ -269,6 +350,47 @@ textarea {
     margin-top: 30px;
     padding-top: 20px;
     border-top: 1px solid #e9ecef;
+}
+
+/* 可见范围选择器 */
+.visibility-selector {
+    display: flex;
+    gap: 15px;
+    margin-top: 10px;
+}
+
+.radio-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 15px;
+    background: #f8f9fa;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    user-select: none;
+}
+
+.radio-item:hover {
+    background: #e9ecef;
+}
+
+.radio-item input[type="radio"] {
+    margin-right: 8px;
+}
+
+.radio-item input[type="radio"]:checked + span {
+    font-weight: 600;
+}
+
+.radio-item span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.radio-item span i {
+    color: #3498db;
 }
 
 /* Google风格搜索 */
@@ -455,12 +577,20 @@ textarea {
 .question-actions .btn {
     padding: 6px 12px;
     font-size: 0.9rem;
-    margin: 0;
 }
 
 .btn-sm {
     padding: 4px 8px !important;
     font-size: 0.8rem !important;
+}
+
+.btn-add-cart {
+    background: #28a745;
+    color: white;
+}
+
+.btn-add-cart:hover {
+    background: #218838;
 }
 
 /* 题目列表 */
@@ -660,8 +790,18 @@ textarea {
         padding: 10px;
     }
     
-    .header h1 {
-        font-size: 2rem;
+    .status-bar {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .status-left h1 {
+        font-size: 1.5rem;
+    }
+    
+    .status-right {
+        width: 100%;
+        justify-content: space-between;
     }
     
     .nav-tabs {
@@ -695,6 +835,21 @@ textarea {
     .modal-header,
     .modal-body {
         padding: 20px;
+    }
+    
+    .visibility-selector {
+        flex-direction: column;
+    }
+    
+    .cart-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .cart-buttons {
+        width: 100%;
+        flex-direction: column;
     }
 }
 
@@ -1020,6 +1175,134 @@ mjx-container[display="true"] {
     display: block;
     text-align: center;
     margin: 1em 0;
+}
+
+/* 购物车模态框样式 */
+.cart-modal-content {
+    max-width: 900px;
+}
+
+.cart-items {
+    max-height: 400px;
+    overflow-y: auto;
+    margin-bottom: 20px;
+}
+
+.cart-item {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.3s ease;
+}
+
+.cart-item:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.cart-item-content {
+    flex: 1;
+    margin-right: 15px;
+}
+
+.cart-item-title {
+    font-weight: 600;
+    margin-bottom: 5px;
+    color: #333;
+}
+
+.cart-item-preview {
+    font-size: 0.9rem;
+    color: #666;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cart-item-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.cart-item-btn {
+    padding: 6px 10px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.3s ease;
+}
+
+.btn-move-up, .btn-move-down {
+    background: #6c757d;
+    color: white;
+}
+
+.btn-move-up:hover, .btn-move-down:hover {
+    background: #5a6268;
+}
+
+.btn-remove-cart {
+    background: #dc3545;
+    color: white;
+}
+
+.btn-remove-cart:hover {
+    background: #c82333;
+}
+
+.cart-empty {
+    text-align: center;
+    padding: 40px;
+    color: #999;
+}
+
+.cart-empty i {
+    font-size: 3rem;
+    margin-bottom: 15px;
+    display: block;
+}
+
+.cart-actions {
+    border-top: 2px solid #e9ecef;
+    padding-top: 20px;
+}
+
+.export-options {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+
+.export-options h4 {
+    margin: 0 0 15px 0;
+    color: #333;
+    font-size: 1rem;
+}
+
+.export-select {
+    width: 100%;
+    padding: 10px;
+    border: 2px solid #e1e5e9;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    transition: all 0.3s ease;
+}
+
+.export-select:focus {
+    outline: none;
+    border-color: #3498db;
+}
+
+.cart-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
 }
 
 /* 滚动条样式 */

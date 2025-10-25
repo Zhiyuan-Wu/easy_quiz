@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - 智能题目数据库管理系统</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .login-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            width: 100%;
+            max-width: 400px;
+            animation: fadeIn 0.5s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .login-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+
+        .login-header i {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        .login-header h1 {
+            font-size: 1.8rem;
+            margin-bottom: 5px;
+        }
+
+        .login-header p {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        .login-tabs {
+            display: flex;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .login-tab {
+            flex: 1;
+            padding: 15px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            color: #666;
+            transition: all 0.3s ease;
+            border-bottom: 3px solid transparent;
+        }
+
+        .login-tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .login-body {
+            padding: 30px;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #333;
+            font-size: 0.9rem;
+        }
+
+        .form-group label i {
+            margin-right: 8px;
+            color: #667eea;
+            width: 16px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn i {
+            margin-right: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .message {
+            padding: 12px 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+            display: none;
+        }
+
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .message.show {
+            display: block;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading-spinner {
+            width: 30px;
+            height: 30px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <i class="fas fa-graduation-cap"></i>
+            <h1>智能题目数据库</h1>
+            <p>管理系统</p>
+        </div>
+
+        <div class="login-tabs">
+            <button class="login-tab active" data-tab="login">
+                <i class="fas fa-sign-in-alt"></i> 登录
+            </button>
+            <button class="login-tab" data-tab="register">
+                <i class="fas fa-user-plus"></i> 注册
+            </button>
+        </div>
+
+        <div class="login-body">
+            <div id="message" class="message"></div>
+            <div id="loading" class="loading">
+                <div class="loading-spinner"></div>
+                <p>处理中...</p>
+            </div>
+
+            <!-- 登录表单 -->
+            <div id="login-form" class="tab-content active">
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label for="login-username">
+                            <i class="fas fa-user"></i> 用户名
+                        </label>
+                        <input type="text" id="login-username" name="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="login-password">
+                            <i class="fas fa-lock"></i> 密码
+                        </label>
+                        <input type="password" id="login-password" name="password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-sign-in-alt"></i> 登录
+                    </button>
+                </form>
+            </div>
+
+            <!-- 注册表单 -->
+            <div id="register-form" class="tab-content">
+                <form id="registerForm">
+                    <div class="form-group">
+                        <label for="register-username">
+                            <i class="fas fa-user"></i> 用户名
+                        </label>
+                        <input type="text" id="register-username" name="username" required minlength="3">
+                    </div>
+                    <div class="form-group">
+                        <label for="register-email">
+                            <i class="fas fa-envelope"></i> 邮箱（可选）
+                        </label>
+                        <input type="email" id="register-email" name="email">
+                    </div>
+                    <div class="form-group">
+                        <label for="register-password">
+                            <i class="fas fa-lock"></i> 密码
+                        </label>
+                        <input type="password" id="register-password" name="password" required minlength="6">
+                    </div>
+                    <div class="form-group">
+                        <label for="register-password-confirm">
+                            <i class="fas fa-lock"></i> 确认密码
+                        </label>
+                        <input type="password" id="register-password-confirm" name="password_confirm" required minlength="6">
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-user-plus"></i> 注册
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 标签切换
+        document.querySelectorAll('.login-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.dataset.tab;
+                
+                // 更新标签状态
+                document.querySelectorAll('.login-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                // 更新内容
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                document.getElementById(`${tabName}-form`).classList.add('active');
+                
+                // 清除消息
+                hideMessage();
+            });
+        });
+
+        // 登录表单提交
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const username = document.getElementById('login-username').value;
+            const password = document.getElementById('login-password').value;
+            
+            try {
+                showLoading(true);
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('登录成功！正在跳转...', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+                } else {
+                    showMessage(result.message, 'error');
+                }
+            } catch (error) {
+                showMessage('登录失败: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        });
+
+        // 注册表单提交
+        document.getElementById('registerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const username = document.getElementById('register-username').value;
+            const email = document.getElementById('register-email').value;
+            const password = document.getElementById('register-password').value;
+            const passwordConfirm = document.getElementById('register-password-confirm').value;
+            
+            if (password !== passwordConfirm) {
+                showMessage('两次输入的密码不一致', 'error');
+                return;
+            }
+            
+            try {
+                showLoading(true);
+                const response = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password, email })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('注册成功！请登录', 'success');
+                    document.getElementById('registerForm').reset();
+                    
+                    // 3秒后自动切换到登录标签
+                    setTimeout(() => {
+                        document.querySelector('[data-tab="login"]').click();
+                    }, 2000);
+                } else {
+                    showMessage(result.message, 'error');
+                }
+            } catch (error) {
+                showMessage('注册失败: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        });
+
+        function showLoading(show) {
+            const loading = document.getElementById('loading');
+            const forms = document.querySelectorAll('form');
+            
+            if (show) {
+                loading.style.display = 'block';
+                forms.forEach(form => form.style.display = 'none');
+            } else {
+                loading.style.display = 'none';
+                forms.forEach(form => form.style.display = 'block');
+            }
+        }
+
+        function showMessage(text, type) {
+            const message = document.getElementById('message');
+            message.textContent = text;
+            message.className = `message ${type} show`;
+            
+            setTimeout(() => {
+                hideMessage();
+            }, 5000);
+        }
+
+        function hideMessage() {
+            const message = document.getElementById('message');
+            message.classList.remove('show');
+        }
+    </script>
+</body>
+</html>
