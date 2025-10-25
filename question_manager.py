@@ -7,9 +7,11 @@ import sqlite3
 import json
 import requests
 import re
+import time
 from typing import List, Dict, Optional, Tuple
 from config import DATABASE_PATH, LLM_CONFIG, QUESTION_TAGS, MAX_QUESTION_LENGTH, MAX_ANSWER_LENGTH
 from openai import OpenAI
+from logger import get_logger
 
 class QuestionManager:
     """高考题目管理器类"""
@@ -23,6 +25,7 @@ class QuestionManager:
         """
         self.db_path = db_path
         self.llm_client = OpenAI(api_key=LLM_CONFIG["api_key"],base_url=LLM_CONFIG["api_url"])
+        self.logger = get_logger()
         self.init_database()
     
     def init_database(self):
@@ -82,16 +85,22 @@ class QuestionManager:
         Returns:
             新插入题目的ID
         """
+        start_time = time.time()
+        
         if not latex_content or len(latex_content) > MAX_QUESTION_LENGTH:
+            self.logger.log_error(ValueError("题目内容不能为空且长度不能超过{}字符".format(MAX_QUESTION_LENGTH)), "添加题目验证")
             raise ValueError("题目内容不能为空且长度不能超过{}字符".format(MAX_QUESTION_LENGTH))
         
         if reference_answer and len(reference_answer) > MAX_ANSWER_LENGTH:
+            self.logger.log_error(ValueError("参考解答长度不能超过{}字符".format(MAX_ANSWER_LENGTH)), "添加题目验证")
             raise ValueError("参考解答长度不能超过{}字符".format(MAX_ANSWER_LENGTH))
         
         tags = tags or []
         tags_json = json.dumps(tags, ensure_ascii=False)
         image = image or []
         image_json = json.dumps(image, ensure_ascii=False)
+        
+        self.logger.log_database_operation("INSERT", "questions", details=f"用户ID: {user_id}, 标签: {tags}, 来源: {source}")
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -104,10 +113,16 @@ class QuestionManager:
             
             question_id = cursor.lastrowid
             conn.commit()
+            
+            duration = time.time() - start_time
+            self.logger.log_performance("添加题目", duration, f"题目ID: {question_id}")
+            self.logger.log_database_operation("INSERT_SUCCESS", "questions", question_id, f"内容长度: {len(latex_content)}")
+            
             return question_id
             
         except Exception as e:
             conn.rollback()
+            self.logger.log_error(e, f"添加题目失败 - 用户ID: {user_id}")
             raise e
         finally:
             conn.close()
@@ -194,34 +209,40 @@ class QuestionManager:
         question = self.get_question_by_id(question_id, current_user_id)
         return question['reference_answer'] if question else None
     
-    def auto_tag_and_answer(self, latex_content: str, source: str = None) -> Tuple[List[str], str]:
+    def auto_tag_and_answer(self, content: str, source: str = None) -> Tuple[List[str], str, str]:
         """
-        使用大语言模型自动打标并生成参考解答
+        使用大语言模型自动打标、生成参考解答并格式化为LaTeX
         
         Args:
-            latex_content: LaTeX格式的题目内容
+            content: 题目内容（可能是普通文本或LaTeX格式）
             source: 题目来源
             
         Returns:
-            (标签列表, 参考解答)
+            (标签列表, 参考解答, LaTeX格式的题目内容)
         """
+        start_time = time.time()
+        
         try:
             # 构建提示词
             prompt = f"""
 请分析以下高考数学题目，并完成以下任务：
 
-1. 从以下标签中选择1-3个最符合的标签：{', '.join(QUESTION_TAGS)}
-2. 生成详细的参考解答
+1. 将题目内容格式化为标准的LaTeX格式，确保数学公式、符号、格式都正确
+2. 从以下标签中选择1-3个最符合的标签：{', '.join(QUESTION_TAGS)}
+3. 生成详细的参考解答
 
 题目内容：
-{latex_content}
+{content}
 
 请按以下JSON格式回复：
 {{
+    "latex_content": "LaTeX格式的题目内容",
     "tags": ["标签1", "标签2"],
     "answer": "详细的参考解答，包含解题步骤和最终答案"
 }}
 """
+            
+            self.logger.log_llm_prompt(prompt, "自动打标和LaTeX格式化")
             
             # 调用大语言模型API
             response = self.llm_client.chat.completions.create(
@@ -232,26 +253,33 @@ class QuestionManager:
             )
             response = response.choices[0].message.content
             
+            self.logger.log_llm_response(response, "自动打标和LaTeX格式化")
+            
             # 解析响应
             try:
                 result = json.loads(response)
+                latex_content = result.get('latex_content', content)
                 tags = result.get('tags', [])
                 answer = result.get('answer', '')
                 
                 # 验证标签是否在允许的标签列表中
                 valid_tags = [tag for tag in tags if tag in QUESTION_TAGS]
                 
-                return valid_tags, answer
+                duration = time.time() - start_time
+                self.logger.log_performance("自动打标和LaTeX格式化", duration, f"标签数量: {len(valid_tags)}")
                 
-            except json.JSONDecodeError:
+                return valid_tags, answer, latex_content
+                
+            except json.JSONDecodeError as e:
+                self.logger.log_error(e, "JSON解析失败 - 自动打标")
                 # 如果JSON解析失败，尝试从文本中提取信息
                 tags = self._extract_tags_from_text(response)
                 answer = self._extract_answer_from_text(response)
-                return tags, answer
+                return tags, answer, content
                 
         except Exception as e:
-            print(f"自动打标失败: {e}")
-            return [], "自动生成解答失败，请手动输入"
+            self.logger.log_error(e, "自动打标失败")
+            return [], "自动生成解答失败，请手动输入", content
     
     def _call_llm_api(self, prompt: str) -> str:
         """
@@ -313,29 +341,37 @@ class QuestionManager:
         
         return '\n'.join(answer_lines) if answer_lines else text
     
-    def parse_exam_paper(self, markdown_content: str) -> List[Dict]:
+    def parse_exam_paper(self, markdown_content: str, image_filename_mapping: Dict[str, str] = None) -> List[Dict]:
         """
         解析试卷内容，提取题目
         
         Args:
             markdown_content: OCR识别的markdown内容
+            image_filename_mapping: 图片文件名映射关系 {原始文件名: 本地路径}
             
         Returns:
             解析出的题目列表
         """
+        start_time = time.time()
+        
         try:
             # 构建提示词
+            images_info = ""
+            if image_filename_mapping:
+                available_filenames = list(image_filename_mapping.keys())
+                images_info = f"\n可用的图片文件：{', '.join(available_filenames)}"
+            
             prompt = f"""
 请分析以下试卷内容，提取所有题目并格式化为LaTeX格式。
 
 试卷内容：
-{markdown_content}
+{markdown_content}{images_info}
 
 请按以下要求处理：
 1. 去除OCR识别中的明显噪声和不合理内容
 2. 识别并分离每道题目
 3. 将题目内容转换为LaTeX格式，选择题选项优先使用enumerate环境
-4. 识别题目中引用的图片（如果有）
+4. 识别题目中引用的图片（如果有），从可用图片列表中选择合适的图片
 5. 为每道题目自动打标并生成解答
 6. 返回JSON格式，包含题目列表
 
@@ -352,6 +388,8 @@ class QuestionManager:
 }}
 """
             
+            self.logger.log_llm_prompt(prompt, "试卷解析")
+            
             # 调用大语言模型API
             response = self.llm_client.chat.completions.create(
                 model=LLM_CONFIG["model"],
@@ -361,16 +399,62 @@ class QuestionManager:
             )
             response = response.choices[0].message.content
             
+            self.logger.log_llm_response(response, "试卷解析")
+            
             # 解析响应
             try:
                 result = json.loads(response)
-                return result.get('questions', [])
-            except json.JSONDecodeError:
-                # 如果JSON解析失败，返回空列表
+                questions = result.get('questions', [])
+                
+                # 验证解析结果
+                if not questions:
+                    self.logger.log_warning("大模型没有解析出任何题目", "试卷解析")
+                    return []
+                
+                # 确保每个题目都有必要的字段
+                validated_questions = []
+                for i, question in enumerate(questions):
+                    if not isinstance(question, dict):
+                        self.logger.log_warning(f"题目 {i+1} 不是有效的字典格式", "试卷解析")
+                        continue
+                    
+                    # 处理图片路径映射
+                    question_images = question.get('image', [])
+                    mapped_images = []
+                    if question_images and image_filename_mapping:
+                        for img_filename in question_images:
+                            if img_filename in image_filename_mapping:
+                                mapped_images.append(image_filename_mapping[img_filename])
+                                self.logger.log_image_processing(img_filename, image_filename_mapping[img_filename], "映射")
+                            else:
+                                self.logger.log_warning(f"图片文件 {img_filename} 在映射中未找到", "试卷解析")
+                    
+                    # 确保必要字段存在
+                    validated_question = {
+                        'question': question.get('question', ''),
+                        'image': mapped_images,  # 使用映射后的本地路径
+                        'tags': question.get('tags', []),
+                        'answer': question.get('answer', '')
+                    }
+                    
+                    if not validated_question['question']:
+                        self.logger.log_warning(f"题目 {i+1} 没有题目内容", "试卷解析")
+                        continue
+                    
+                    validated_questions.append(validated_question)
+                
+                duration = time.time() - start_time
+                self.logger.log_performance("试卷解析", duration, f"解析出 {len(validated_questions)} 道题目")
+                self.logger.log_question_parsing(len(validated_questions), "试卷解析")
+                
+                return validated_questions
+                
+            except json.JSONDecodeError as e:
+                self.logger.log_error(e, "JSON解析失败 - 试卷解析")
                 return []
                 
         except Exception as e:
-            print(f"解析试卷失败: {e}")
+            self.logger.log_error(e, "解析试卷失败")
             return []
     
     def delete_question(self, question_id: int, current_user_id: int = None) -> bool:
@@ -496,16 +580,33 @@ class QuestionManager:
         if not row:
             return None
         
-        # 处理不同长度的行（用于数据库升级兼容）
+        # 获取列信息以正确处理ALTER TABLE后的列顺序
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(questions)")
+        columns_info = cursor.fetchall()
+        conn.close()
+        
+        # 创建列名到索引的映射
+        column_map = {col[1]: idx for idx, col in enumerate(columns_info)}
+        
+        # 安全地获取列值，处理可能不存在的列
+        def get_column_value(column_name, default=None):
+            if column_name in column_map:
+                idx = column_map[column_name]
+                if idx < len(row):
+                    return row[idx]
+            return default
+        
         return {
-            'id': row[0],
-            'latex_content': row[1],
-            'tags': json.loads(row[2]),
-            'reference_answer': row[3],
-            'source': row[4],
-            'image': json.loads(row[5]) if row[5] else [],
-            'user_id': row[6] if len(row) > 6 else None,
-            'visibility': row[7] if len(row) > 7 else 'public',
-            'created_at': row[8] if len(row) > 8 else row[6],
-            'updated_at': row[9] if len(row) > 9 else row[7]
+            'id': get_column_value('id'),
+            'latex_content': get_column_value('latex_content'),
+            'tags': json.loads(get_column_value('tags', '[]')),
+            'reference_answer': get_column_value('reference_answer'),
+            'source': get_column_value('source'),
+            'image': json.loads(get_column_value('image', '[]')) if get_column_value('image') else [],
+            'user_id': get_column_value('user_id'),
+            'visibility': get_column_value('visibility', 'public'),
+            'created_at': get_column_value('created_at'),
+            'updated_at': get_column_value('updated_at')
         }

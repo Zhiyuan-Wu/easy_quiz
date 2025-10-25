@@ -103,11 +103,11 @@
                 <form id="question-form">
                     <div class="form-group">
                         <label for="latex-content">
-                            <i class="fas fa-code"></i> 题目内容 (LaTeX格式)
+                            <i class="fas fa-code"></i> 题目内容
                         </label>
                         <textarea id="latex-content" name="latex_content" rows="8" 
-                                placeholder="请输入题目的LaTeX格式内容..."></textarea>
-                        <div class="help-text">支持LaTeX数学公式，如：$x^2 + y^2 = 1$</div>
+                                placeholder="请输入题目内容（支持普通文本或LaTeX格式）..."></textarea>
+                        <div class="help-text">支持普通文本和LaTeX数学公式，系统会自动格式化为标准LaTeX格式</div>
                     </div>
 
                     <div class="form-group">
@@ -166,7 +166,7 @@
 
                     <div class="form-actions">
                         <button type="button" id="auto-tag-btn" class="btn btn-secondary">
-                            <i class="fas fa-magic"></i> 自动打标和生成解答
+                            <i class="fas fa-magic"></i> 自动打标、生成解答和LaTeX格式化
                         </button>
                         <button type="submit" class="btn btn-primary">
                             <i class="fas fa-save"></i> 保存题目

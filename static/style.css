@@ -411,10 +411,10 @@ textarea {
     width: 100%;
     max-width: 600px;
     background: white;
-    border: 2px solid #e1e5e9;
-    border-radius: 8px;
+    /* border: 2px solid #e1e5e9; */
+    /* border-radius: 8px; */
     padding: 12px 20px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    /* box-shadow: 0 2px 8px rgba(0,0,0,0.1); */
     transition: all 0.3s ease;
 }
 
@@ -552,7 +552,6 @@ textarea {
     display: flex;
     flex-wrap: wrap;
     gap: 5px;
-    margin-bottom: 10px;
 }
 
 .question-tag {

@@ -8,11 +8,13 @@ from functools import wraps
 import json
 import os
 import uuid
+import time
 from werkzeug.utils import secure_filename
 from question_manager import QuestionManager
 from ocr_client import DeepSeekOCRClient
 from user_manager import UserManager
 from config import WEB_CONFIG, QUESTION_TAGS, OCR_BASE_URL, LLM_CONFIG, SECRET_KEY, USER_DATABASE_PATH
+from logger import get_logger
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
@@ -26,6 +28,9 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 # 确保上传文件夹存在
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
+
+# 初始化日志记录器
+logger = get_logger()
 
 # 初始化题目管理器
 question_manager = QuestionManager()
@@ -168,26 +173,36 @@ def add_question():
 @app.route('/api/questions/auto-tag', methods=['POST'])
 @login_required
 def auto_tag_question():
-    """自动打标和生成解答API"""
+    """自动打标、生成解答和LaTeX格式化API"""
+    start_time = time.time()
+    
     try:
         data = request.get_json()
         
-        if not data or 'latex_content' not in data:
+        if not data or 'content' not in data:
             return jsonify({'success': False, 'message': '题目内容不能为空'}), 400
         
-        latex_content = data['latex_content']
+        content = data['content']
         source = data.get('source', '')
+        user_id = session.get('user_id')
         
-        # 自动打标和生成解答
-        tags, answer = question_manager.auto_tag_and_answer(latex_content, source)
+        logger.log_user_action(user_id, "自动打标和LaTeX格式化", f"内容长度: {len(content)}")
+        
+        # 自动打标、生成解答和LaTeX格式化
+        tags, answer, latex_content = question_manager.auto_tag_and_answer(content, source)
+        
+        duration = time.time() - start_time
+        logger.log_performance("自动打标API", duration, f"用户ID: {user_id}")
         
         return jsonify({
             'success': True,
             'tags': tags,
-            'answer': answer
+            'answer': answer,
+            'latex_content': latex_content
         })
         
     except Exception as e:
+        logger.log_error(e, f"自动打标API失败 - 用户ID: {session.get('user_id')}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/questions/search', methods=['GET'])
@@ -365,11 +380,60 @@ def ocr_parse():
             
             try:
                 # 调用OCR
+                logger.log_system_info(f"开始OCR处理 - 文件: {temp_filename}")
                 ocr_result = ocr_client.ocr_image(temp_path)
                 markdown_content = ocr_result.get('markdown', '')
+                ocr_images = ocr_result.get('images', [])
                 
-                # 调用大模型解析题目
-                parsed_questions = question_manager.parse_exam_paper(markdown_content)
+                logger.log_ocr_result(ocr_result.get('request_id', 'unknown'), markdown_content, len(ocr_images))
+                
+                # 处理OCR返回的图片数据
+                image_filename_mapping = {}  # 原始文件名 -> 本地保存路径的映射
+                if ocr_images:
+                    # 创建集中的图片目录
+                    images_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'ocr_images')
+                    if not os.path.exists(images_dir):
+                        os.makedirs(images_dir)
+                    
+                    for img_data in ocr_images:
+                        if isinstance(img_data, dict) and 'filename' in img_data and 'data' in img_data:
+                            original_filename = img_data['filename']  # 如 "0.jpg", "1.jpg"
+                            image_data = img_data['data']
+                            
+                            # 处理base64编码的图片数据
+                            if isinstance(image_data, str):
+                                # 如果是base64字符串，解码为bytes
+                                import base64
+                                image_bytes = base64.b64decode(image_data)
+                            else:
+                                # 如果已经是bytes，直接使用
+                                image_bytes = image_data
+                            
+                            # 生成唯一文件名避免重名，但保留原始扩展名
+                            name, ext = os.path.splitext(original_filename)
+                            unique_filename = f"ocr_{uuid.uuid4().hex[:8]}_{original_filename}"
+                            dest_path = os.path.join(images_dir, unique_filename)
+                            
+                            # 保存图片数据到本地
+                            with open(dest_path, 'wb') as f:
+                                f.write(image_bytes)
+                            
+                            # 记录映射关系：原始文件名 -> 本地相对路径
+                            relative_path = f"/uploads/ocr_images/{unique_filename}"
+                            image_filename_mapping[original_filename] = relative_path
+                            logger.log_image_processing(original_filename, relative_path, "保存")
+                
+                # 调用大模型解析题目，传递文件名映射关系
+                logger.log_system_info(f"开始解析试卷，markdown内容长度: {len(markdown_content)}, 可用图片数量: {len(image_filename_mapping)}")
+                
+                parsed_questions = question_manager.parse_exam_paper(markdown_content, image_filename_mapping)
+                logger.log_question_parsing(len(parsed_questions), "试卷解析")
+                
+                if not parsed_questions:
+                    return jsonify({
+                        'success': False,
+                        'message': '试卷解析完成，但没有识别出任何题目。请检查试卷图片质量或内容格式。'
+                    })
                 
                 return jsonify({
                     'success': True,

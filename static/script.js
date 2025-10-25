@@ -369,10 +369,10 @@ async function handleFormSubmit(e) {
 
 // 处理自动打标
 async function handleAutoTag() {
-    const latexContent = document.getElementById('latex-content').value;
+    const content = document.getElementById('latex-content').value;
     const source = document.getElementById('source').value;
     
-    if (!latexContent.trim()) {
+    if (!content.trim()) {
         showMessage('请先输入题目内容', 'error');
         return;
     }
@@ -386,7 +386,7 @@ async function handleAutoTag() {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                latex_content: latexContent,
+                content: content,
                 source: source
             })
         });
@@ -394,6 +394,11 @@ async function handleAutoTag() {
         const result = await response.json();
         
         if (result.success) {
+            // 设置LaTeX格式化的题目内容
+            if (result.latex_content) {
+                document.getElementById('latex-content').value = result.latex_content;
+            }
+            
             // 设置标签
             const selectedTags = result.tags;
             tagSelector.querySelectorAll('.tag-item').forEach(tagElement => {
@@ -412,7 +417,7 @@ async function handleAutoTag() {
             // 设置参考解答
             document.getElementById('reference-answer').value = result.answer;
             
-            showMessage('自动打标完成！', 'success');
+            showMessage('自动打标和LaTeX格式化完成！', 'success');
         } else {
             showMessage('自动打标失败: ' + result.message, 'error');
         }
@@ -573,12 +578,23 @@ function renderQuestionList() {
                     </div>
                 </div>
             </div>
-            <div class="question-content-preview">
-                ${renderMathContent(question.latex_content).replace(/\n/g, ' ').substring(0, 100)}${question.latex_content.length > 100 ? '...' : ''}
+            <div class="question-content">
+                ${renderMathContent(question.latex_content)}
             </div>
             <div class="question-actions">
                 <button class="btn btn-primary btn-sm" onclick="viewQuestion(${question.id})">
                     <i class="fas fa-eye"></i> 查看详情
+                </button>
+                ${question.reference_answer ? `
+                    <button class="btn btn-secondary btn-sm" onclick="viewAnswer(${question.id})">
+                        <i class="fas fa-lightbulb"></i> 查看解答
+                    </button>
+                ` : ''}
+                <button class="btn btn-add-cart btn-sm" onclick="addToCart(${question.id})">
+                    <i class="fas fa-plus"></i> 加入试卷
+                </button>
+                <button class="btn btn-danger btn-sm" onclick="deleteQuestion(${question.id})">
+                    <i class="fas fa-trash"></i> 删除题目
                 </button>
             </div>
         </div>
@@ -841,23 +857,43 @@ async function handleParseExam() {
     
     try {
         showLoading(true);
+        console.log('开始解析试卷...');
+        
         const response = await fetch('/api/ocr-parse', {
             method: 'POST',
             body: formData
         });
         
         const result = await response.json();
+        console.log('解析结果:', result);
         
         if (result.success) {
-            parsedQuestions = result.questions;
-            renderParsedQuestions();
-            parsedQuestionsDiv.style.display = 'block';
-            document.getElementById('parsed-count').textContent = parsedQuestions.length;
-            showMessage('试卷解析成功！', 'success');
+            parsedQuestions = result.questions || [];
+            console.log('解析出的题目数量:', parsedQuestions.length);
+            console.log('题目详情:', parsedQuestions);
+            
+            // 检查每个题目的图片信息
+            parsedQuestions.forEach((question, index) => {
+                if (question.image && question.image.length > 0) {
+                    console.log(`题目 ${index + 1} 的图片:`, question.image);
+                }
+            });
+            
+            if (parsedQuestions.length === 0) {
+                showMessage('试卷解析完成，但没有识别出任何题目', 'warning');
+                parsedQuestionsDiv.style.display = 'none';
+            } else {
+                renderParsedQuestions();
+                parsedQuestionsDiv.style.display = 'block';
+                document.getElementById('parsed-count').textContent = parsedQuestions.length;
+                showMessage(`试卷解析成功！共识别出 ${parsedQuestions.length} 道题目`, 'success');
+            }
         } else {
+            console.error('解析失败:', result.message);
             showMessage('试卷解析失败: ' + result.message, 'error');
         }
     } catch (error) {
+        console.error('解析过程中发生错误:', error);
         showMessage('试卷解析失败: ' + error.message, 'error');
     } finally {
         showLoading(false);
@@ -866,36 +902,49 @@ async function handleParseExam() {
 
 // 渲染解析出的题目
 function renderParsedQuestions() {
-    parsedQuestionsList.innerHTML = parsedQuestions.map((question, index) => `
-        <div class="parsed-question-item">
-            <h5>题目 ${index + 1}</h5>
-            <div class="parsed-question-content">
-                ${renderMathContent(question.question)}
+    if (!parsedQuestions || parsedQuestions.length === 0) {
+        parsedQuestionsList.innerHTML = '<div class="no-results">没有解析出任何题目</div>';
+        return;
+    }
+    
+    parsedQuestionsList.innerHTML = parsedQuestions.map((question, index) => {
+        // 确保题目对象有必要的字段
+        const questionText = question.question || question.latex_content || '题目内容缺失';
+        const questionImages = question.image || [];
+        const questionTags = question.tags || [];
+        const questionAnswer = question.answer || '';
+        
+        return `
+            <div class="parsed-question-item">
+                <h5>题目 ${index + 1}</h5>
+                <div class="parsed-question-content">
+                    ${renderMathContent(questionText)}
+                </div>
+                ${questionImages.length > 0 ? `
+                    <div class="question-images">
+                        ${questionImages.map(img => `<img src="${img}" style="max-width: 200px; margin: 5px;">`).join('')}
+                    </div>
+                ` : ''}
+                ${questionTags.length > 0 ? `
+                    <div class="parsed-tags">
+                        <strong>标签：</strong>
+                        ${questionTags.map(tag => `<span class="parsed-tag">${tag}</span>`).join('')}
+                    </div>
+                ` : ''}
+                ${questionAnswer ? `
+                    <div class="parsed-answer">
+                        <strong>解答：</strong>
+                        <div class="parsed-answer-content">${renderMathContent(questionAnswer)}</div>
+                    </div>
+                ` : ''}
+                <div class="question-actions" style="margin-top: 10px;">
+                    <button class="btn btn-add-cart btn-sm" onclick="addParsedToCart(${index})">
+                        <i class="fas fa-plus"></i> 加入试卷
+                    </button>
+                </div>
             </div>
-            ${question.image && question.image.length > 0 ? `
-                <div class="question-images">
-                    ${question.image.map(img => `<img src="${img}" style="max-width: 200px; margin: 5px;">`).join('')}
-                </div>
-            ` : ''}
-            ${question.tags && question.tags.length > 0 ? `
-                <div class="parsed-tags">
-                    <strong>标签：</strong>
-                    ${question.tags.map(tag => `<span class="parsed-tag">${tag}</span>`).join('')}
-                </div>
-            ` : ''}
-            ${question.answer ? `
-                <div class="parsed-answer">
-                    <strong>解答：</strong>
-                    <div class="parsed-answer-content">${renderMathContent(question.answer)}</div>
-                </div>
-            ` : ''}
-            <div class="question-actions" style="margin-top: 10px;">
-                <button class="btn btn-add-cart btn-sm" onclick="addParsedToCart(${index})">
-                    <i class="fas fa-plus"></i> 加入试卷
-                </button>
-            </div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
     
     renderMath();
 }
@@ -1125,6 +1174,37 @@ async function exportPaper() {
     }
 }
 
+// 删除题目
+async function deleteQuestion(questionId) {
+    if (!confirm('确定要删除这道题目吗？此操作不可恢复。')) {
+        return;
+    }
+    
+    try {
+        showLoading(true);
+        
+        const response = await fetch(`/api/questions/${questionId}`, {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showMessage('题目删除成功！', 'success');
+            // 重新加载题目列表
+            await loadQuestions();
+            // 重新加载统计
+            await loadStats();
+        } else {
+            showMessage('删除失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        showMessage('删除失败: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
 // 全局函数，供HTML调用
 window.viewQuestion = viewQuestion;
 window.viewAnswer = viewAnswer;
@@ -1133,3 +1213,4 @@ window.addToCart = addToCart;
 window.addParsedToCart = addParsedToCart;
 window.moveCartItem = moveCartItem;
 window.removeFromCart = removeFromCart;
+window.deleteQuestion = deleteQuestion;
