@@ -23,10 +23,29 @@
 </head>
 <body>
     <div class="container">
-        <!-- 头部 -->
-        <header class="header">
-            <h1><i class="fas fa-graduation-cap"></i> 智能题目数据库管理系统</h1>
-        </header>
+        <!-- 状态栏 -->
+        <div class="status-bar">
+            <div class="status-left">
+                <h1><i class="fas fa-graduation-cap"></i> 智能题目数据库管理系统</h1>
+            </div>
+            <div class="status-right">
+                <div class="status-item">
+                    <i class="fas fa-database"></i>
+                    <span>题目总量: <strong id="total-questions">0</strong></span>
+                </div>
+                <div class="status-item">
+                    <i class="fas fa-user"></i>
+                    <span>用户: <strong id="current-username">-</strong></span>
+                </div>
+                <div class="status-item cart-icon" id="cart-icon" title="生成试卷">
+                    <i class="fas fa-shopping-cart"></i>
+                    <span class="cart-badge" id="cart-badge">0</span>
+                </div>
+                <button class="btn-logout" id="logout-btn">
+                    <i class="fas fa-sign-out-alt"></i> 登出
+                </button>
+            </div>
+        </div>
 
         <!-- 导航标签 -->
         <nav class="nav-tabs">
@@ -109,6 +128,22 @@
                     </div>
 
                     <div class="form-group">
+                        <label>
+                            <i class="fas fa-eye"></i> 可见范围
+                        </label>
+                        <div class="visibility-selector">
+                            <label class="radio-item">
+                                <input type="radio" name="visibility" value="public" checked>
+                                <span><i class="fas fa-globe"></i> 所有人</span>
+                            </label>
+                            <label class="radio-item">
+                                <input type="radio" name="visibility" value="private">
+                                <span><i class="fas fa-lock"></i> 仅自己</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
                         <label for="image-upload">
                             <i class="fas fa-image"></i> 题目图片
                         </label>
@@ -149,6 +184,22 @@
                     <p>上传试卷图片，系统将自动识别并解析出所有题目</p>
                 </div>
                 
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label>
+                        <i class="fas fa-eye"></i> 可见范围（默认）
+                    </label>
+                    <div class="visibility-selector">
+                        <label class="radio-item">
+                            <input type="radio" name="ocr-visibility" value="public" checked>
+                            <span><i class="fas fa-globe"></i> 所有人</span>
+                        </label>
+                        <label class="radio-item">
+                            <input type="radio" name="ocr-visibility" value="private">
+                            <span><i class="fas fa-lock"></i> 仅自己</span>
+                        </label>
+                    </div>
+                </div>
+
                 <div class="ocr-upload-area">
                     <div class="upload-zone" id="upload-zone">
                         <div class="upload-icon">
@@ -190,38 +241,6 @@
                             <i class="fas fa-save"></i> 批量保存到数据库
                         </button>
                     </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 查询题目页面 -->
-        <div id="search-tab" class="tab-content">
-            <div class="card">
-                <h2><i class="fas fa-search"></i> 查询题目</h2>
-                
-                <!-- Google风格搜索框 -->
-                <div class="google-search-container">
-                    <div class="search-box-wrapper">
-                        <div class="search-box">
-                            <i class="fas fa-search search-icon"></i>
-                            <input type="text" id="search-keyword" placeholder="搜索题目内容..." class="search-input">
-                            <button id="search-btn" class="search-button">
-                                <i class="fas fa-search"></i>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- 标签筛选 -->
-                    <div class="filter-section">
-                        <h4><i class="fas fa-filter"></i> 按标签筛选</h4>
-                        <div class="tag-filter" id="tag-filter">
-                            <!-- 标签将通过JavaScript动态加载 -->
-                        </div>
-                    </div>
-                </div>
-
-                <div id="search-results" class="search-results">
-                    <!-- 搜索结果将在这里显示 -->
                 </div>
             </div>
         </div>
@@ -269,6 +288,49 @@
                 <div id="modal-question-content"></div>
                 <div id="modal-question-tags"></div>
                 <div id="modal-question-answer"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 购物车/生成试卷模态框 -->
+    <div id="cart-modal" class="modal">
+        <div class="modal-content cart-modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-shopping-cart"></i> 生成试卷</h3>
+                <button class="modal-close" id="cart-modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="cart-items" class="cart-items">
+                    <!-- 购物车项目将在这里显示 -->
+                </div>
+                <div class="cart-actions">
+                    <div class="export-options">
+                        <h4>导出选项</h4>
+                        <div class="form-group">
+                            <label>导出模式</label>
+                            <select id="export-mode" class="export-select">
+                                <option value="questions">仅试题</option>
+                                <option value="with-answers">试题 + 解析答案</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>导出格式</label>
+                            <select id="export-format" class="export-select">
+                                <option value="latex">LaTeX</option>
+                                <option value="docx">Word (DOCX)</option>
+                                <option value="pdf">PDF</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="cart-buttons">
+                        <button type="button" id="clear-cart-btn" class="btn btn-secondary">
+                            <i class="fas fa-trash"></i> 清空
+                        </button>
+                        <button type="button" id="export-paper-btn" class="btn btn-primary">
+                            <i class="fas fa-download"></i> 导出试卷
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

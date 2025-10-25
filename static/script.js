@@ -5,6 +5,8 @@ let availableTags = [];
 let currentQuestions = [];
 let uploadedImages = [];
 let parsedQuestions = [];
+let cart = []; // 购物车
+let currentUser = null;
 
 // DOM元素
 const navTabs = document.querySelectorAll('.nav-tab');
@@ -30,18 +32,28 @@ const message = document.getElementById('message');
 const messageText = document.getElementById('message-text');
 const messageClose = document.getElementById('message-close');
 
-// 新增的DOM元素
+// 图片上传相关
 const imageUpload = document.getElementById('image-upload');
 const uploadBtn = document.getElementById('upload-btn');
 const imagePreview = document.getElementById('image-preview');
+
+// 试卷解析相关
 const examUpload = document.getElementById('exam-upload');
 const examUploadBtn = document.getElementById('exam-upload-btn');
 const examPreview = document.getElementById('exam-preview');
 const parseExamBtn = document.getElementById('parse-exam-btn');
 const parsedQuestionsDiv = document.getElementById('parsed-questions');
 const parsedQuestionsList = document.getElementById('parsed-questions-list');
-const batchTagBtn = document.getElementById('batch-tag-btn');
 const batchSaveBtn = document.getElementById('batch-save-btn');
+
+// 状态栏和购物车相关
+const logoutBtn = document.getElementById('logout-btn');
+const cartIcon = document.getElementById('cart-icon');
+const cartBadge = document.getElementById('cart-badge');
+const cartModal = document.getElementById('cart-modal');
+const cartModalClose = document.getElementById('cart-modal-close');
+const clearCartBtn = document.getElementById('clear-cart-btn');
+const exportPaperBtn = document.getElementById('export-paper-btn');
 
 // 初始化
 document.addEventListener('DOMContentLoaded', function() {
@@ -50,10 +62,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // 初始化应用
 async function initializeApp() {
+    // 检查登录状态
+    await checkLoginStatus();
+    
     setupEventListeners();
     
-    // 先加载标签，再加载内容
+    // 加载标签
     await loadAvailableTags();
+    
+    // 加载统计信息
+    await loadStats();
     
     // 根据当前激活的标签页加载相应内容
     const activeTab = document.querySelector('.nav-tab.active');
@@ -70,6 +88,40 @@ async function initializeApp() {
     setTimeout(() => {
         renderMath();
     }, 100);
+    
+    // 更新购物车显示
+    updateCartBadge();
+}
+
+// 检查登录状态
+async function checkLoginStatus() {
+    try {
+        const response = await fetch('/api/auth/current');
+        const result = await response.json();
+        
+        if (result.success) {
+            currentUser = result.user;
+            document.getElementById('current-username').textContent = currentUser.username;
+        } else {
+            window.location.href = '/login';
+        }
+    } catch (error) {
+        window.location.href = '/login';
+    }
+}
+
+// 加载统计信息
+async function loadStats() {
+    try {
+        const response = await fetch('/api/questions/stats');
+        const result = await response.json();
+        
+        if (result.success) {
+            document.getElementById('total-questions').textContent = result.stats.total;
+        }
+    } catch (error) {
+        console.error('加载统计信息失败:', error);
+    }
 }
 
 // 设置事件监听器
@@ -141,9 +193,37 @@ function setupEventListeners() {
     // 移除试卷按钮
     document.getElementById('remove-exam-btn').addEventListener('click', removeExam);
     
-    // 批量操作
-    batchTagBtn.addEventListener('click', handleBatchTag);
+    // 批量保存
     batchSaveBtn.addEventListener('click', handleBatchSave);
+    
+    // 登出按钮
+    logoutBtn.addEventListener('click', handleLogout);
+    
+    // 购物车图标
+    cartIcon.addEventListener('click', openCartModal);
+    cartModalClose.addEventListener('click', closeCartModal);
+    cartModal.addEventListener('click', (e) => {
+        if (e.target === cartModal) closeCartModal();
+    });
+    
+    // 购物车操作
+    clearCartBtn.addEventListener('click', clearCart);
+    exportPaperBtn.addEventListener('click', exportPaper);
+}
+
+// 登出
+async function handleLogout() {
+    try {
+        const response = await fetch('/api/auth/logout', {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            window.location.href = '/login';
+        }
+    } catch (error) {
+        showMessage('登出失败: ' + error.message, 'error');
+    }
 }
 
 // 切换标签页
@@ -160,9 +240,7 @@ function switchTab(tabName) {
     if (tabName === 'manage') {
         loadQuestions();
     } else if (tabName === 'search') {
-        // 搜索页面默认加载所有题目
         loadAllQuestions();
-        // 确保标签筛选正确显示
         if (availableTags.length > 0) {
             renderTagFilter();
         }
@@ -238,13 +316,15 @@ async function handleFormSubmit(e) {
     
     const formData = new FormData(questionForm);
     const selectedTags = getSelectedTags(tagSelector);
+    const visibility = document.querySelector('input[name="visibility"]:checked').value;
     
     const questionData = {
         latex_content: formData.get('latex_content'),
         tags: selectedTags,
         reference_answer: formData.get('reference_answer'),
         source: formData.get('source'),
-        image: uploadedImages
+        image: uploadedImages,
+        visibility: visibility
     };
     
     if (!questionData.latex_content.trim()) {
@@ -268,11 +348,15 @@ async function handleFormSubmit(e) {
         if (result.success) {
             showMessage('题目添加成功！', 'success');
             questionForm.reset();
+            uploadedImages = [];
+            imagePreview.innerHTML = '';
             // 清除标签选择
             tagSelector.querySelectorAll('.tag-item').forEach(tag => {
                 tag.classList.remove('selected');
                 tag.querySelector('input[type="checkbox"]').checked = false;
             });
+            // 重新加载统计
+            await loadStats();
         } else {
             showMessage('添加失败: ' + result.message, 'error');
         }
@@ -327,9 +411,6 @@ async function handleAutoTag() {
             
             // 设置参考解答
             document.getElementById('reference-answer').value = result.answer;
-            
-            // 显示打标结果预览
-            showTaggingPreview(result.tags, result.answer);
             
             showMessage('自动打标完成！', 'success');
         } else {
@@ -402,7 +483,7 @@ async function handleSearch() {
     }
 }
 
-// 渲染搜索结果
+// 渲染搜索结果（与题目预览保持一致的样式）
 function renderSearchResults() {
     if (currentQuestions.length === 0) {
         searchResults.innerHTML = '<div class="no-results">没有找到相关题目</div>';
@@ -412,23 +493,33 @@ function renderSearchResults() {
     searchResults.innerHTML = currentQuestions.map(question => `
         <div class="question-item">
             <div class="question-header">
-                <span class="question-id">#${question.id}</span>
-                <div class="question-tags">
-                    ${question.tags.map(tag => `<span class="question-tag">${tag}</span>`).join('')}
+                <div class="question-meta-row">
+                    <div class="question-left">
+                        <span class="question-id">#${question.id}</span>
+                        <div class="question-tags">
+                            ${question.tags.map(tag => `<span class="question-tag">${tag}</span>`).join('')}
+                        </div>
+                    </div>
+                    <div class="question-right">
+                        <small>${question.source || '未知'} | ${formatDate(question.created_at)}</small>
+                    </div>
                 </div>
             </div>
             <div class="question-content">
                 ${renderMathContent(question.latex_content)}
             </div>
             <div class="question-actions">
-                <button class="btn btn-primary" onclick="viewQuestion(${question.id})">
+                <button class="btn btn-primary btn-sm" onclick="viewQuestion(${question.id})">
                     <i class="fas fa-eye"></i> 查看详情
                 </button>
                 ${question.reference_answer ? `
-                    <button class="btn btn-secondary" onclick="viewAnswer(${question.id})">
+                    <button class="btn btn-secondary btn-sm" onclick="viewAnswer(${question.id})">
                         <i class="fas fa-lightbulb"></i> 查看解答
                     </button>
                 ` : ''}
+                <button class="btn btn-add-cart btn-sm" onclick="addToCart(${question.id})">
+                    <i class="fas fa-plus"></i> 加入试卷
+                </button>
             </div>
         </div>
     `).join('');
@@ -473,9 +564,6 @@ function renderQuestionList() {
                 <div class="question-meta-row">
                     <div class="question-left">
                         <span class="question-id">#${question.id}</span>
-                        <button class="btn btn-primary btn-sm" onclick="viewQuestion(${question.id})">
-                            <i class="fas fa-eye"></i> 查看
-                        </button>
                         <div class="question-tags">
                             ${question.tags.map(tag => `<span class="question-tag">${tag}</span>`).join('')}
                         </div>
@@ -487,6 +575,11 @@ function renderQuestionList() {
             </div>
             <div class="question-content-preview">
                 ${renderMathContent(question.latex_content).replace(/\n/g, ' ').substring(0, 100)}${question.latex_content.length > 100 ? '...' : ''}
+            </div>
+            <div class="question-actions">
+                <button class="btn btn-primary btn-sm" onclick="viewQuestion(${question.id})">
+                    <i class="fas fa-eye"></i> 查看详情
+                </button>
             </div>
         </div>
     `).join('');
@@ -796,12 +889,16 @@ function renderParsedQuestions() {
                     <div class="parsed-answer-content">${renderMathContent(question.answer)}</div>
                 </div>
             ` : ''}
+            <div class="question-actions" style="margin-top: 10px;">
+                <button class="btn btn-add-cart btn-sm" onclick="addParsedToCart(${index})">
+                    <i class="fas fa-plus"></i> 加入试卷
+                </button>
+            </div>
         </div>
     `).join('');
     
     renderMath();
 }
-
 
 // 批量保存
 async function handleBatchSave() {
@@ -809,6 +906,8 @@ async function handleBatchSave() {
         showMessage('没有可保存的题目', 'error');
         return;
     }
+    
+    const visibility = document.querySelector('input[name="ocr-visibility"]:checked').value;
     
     try {
         showLoading(true);
@@ -825,7 +924,8 @@ async function handleBatchSave() {
                     tags: question.tags || [],
                     reference_answer: question.answer || '',
                     source: '试卷解析',
-                    image: question.image || []
+                    image: question.image || [],
+                    visibility: visibility
                 })
             });
             
@@ -838,7 +938,9 @@ async function handleBatchSave() {
         showMessage(`成功保存 ${successCount} 道题目！`, 'success');
         parsedQuestions = [];
         parsedQuestionsDiv.style.display = 'none';
-        removeExam(); // 重置整个上传区域
+        removeExam();
+        // 重新加载统计
+        await loadStats();
     } catch (error) {
         showMessage('批量保存失败: ' + error.message, 'error');
     } finally {
@@ -846,77 +948,180 @@ async function handleBatchSave() {
     }
 }
 
-// 删除题目
-async function deleteQuestion(questionId) {
-    if (!confirm('确定要删除这道题目吗？此操作不可撤销。')) {
+// 购物车功能
+
+// 添加题目到购物车
+async function addToCart(questionId) {
+    try {
+        const response = await fetch(`/api/questions/${questionId}`);
+        const result = await response.json();
+        
+        if (result.success) {
+            const question = result.question;
+            
+            // 检查是否已存在
+            if (cart.find(item => item.id === questionId)) {
+                showMessage('该题目已在试卷中', 'warning');
+                return;
+            }
+            
+            cart.push(question);
+            updateCartBadge();
+            showMessage('已加入试卷', 'success');
+        }
+    } catch (error) {
+        showMessage('添加失败: ' + error.message, 'error');
+    }
+}
+
+// 添加解析的题目到购物车
+function addParsedToCart(index) {
+    const question = parsedQuestions[index];
+    
+    // 给解析的题目添加一个临时ID
+    const tempId = 'parsed_' + index + '_' + Date.now();
+    const cartItem = {
+        id: tempId,
+        latex_content: question.question,
+        tags: question.tags || [],
+        reference_answer: question.answer || '',
+        source: '试卷解析',
+        isParsed: true
+    };
+    
+    cart.push(cartItem);
+    updateCartBadge();
+    showMessage('已加入试卷', 'success');
+}
+
+// 更新购物车徽章
+function updateCartBadge() {
+    cartBadge.textContent = cart.length;
+}
+
+// 打开购物车模态框
+function openCartModal() {
+    renderCart();
+    cartModal.style.display = 'block';
+}
+
+// 关闭购物车模态框
+function closeCartModal() {
+    cartModal.style.display = 'none';
+}
+
+// 渲染购物车
+function renderCart() {
+    const cartItemsDiv = document.getElementById('cart-items');
+    
+    if (cart.length === 0) {
+        cartItemsDiv.innerHTML = `
+            <div class="cart-empty">
+                <i class="fas fa-shopping-cart"></i>
+                <p>试卷为空，请先添加题目</p>
+            </div>
+        `;
         return;
     }
+    
+    cartItemsDiv.innerHTML = cart.map((item, index) => `
+        <div class="cart-item" data-index="${index}">
+            <div class="cart-item-content">
+                <div class="cart-item-title">题目 ${index + 1}</div>
+                <div class="cart-item-preview">${renderMathContent(item.latex_content).substring(0, 80)}...</div>
+            </div>
+            <div class="cart-item-actions">
+                ${index > 0 ? `<button class="cart-item-btn btn-move-up" onclick="moveCartItem(${index}, -1)">
+                    <i class="fas fa-arrow-up"></i>
+                </button>` : ''}
+                ${index < cart.length - 1 ? `<button class="cart-item-btn btn-move-down" onclick="moveCartItem(${index}, 1)">
+                    <i class="fas fa-arrow-down"></i>
+                </button>` : ''}
+                <button class="cart-item-btn btn-remove-cart" onclick="removeFromCart(${index})">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+// 移动购物车项目
+function moveCartItem(index, direction) {
+    const newIndex = index + direction;
+    if (newIndex >= 0 && newIndex < cart.length) {
+        [cart[index], cart[newIndex]] = [cart[newIndex], cart[index]];
+        renderCart();
+    }
+}
+
+// 从购物车移除
+function removeFromCart(index) {
+    cart.splice(index, 1);
+    updateCartBadge();
+    renderCart();
+    showMessage('已从试卷中移除', 'success');
+}
+
+// 清空购物车
+function clearCart() {
+    if (cart.length === 0) {
+        return;
+    }
+    
+    if (confirm('确定要清空试卷吗？')) {
+        cart = [];
+        updateCartBadge();
+        renderCart();
+        showMessage('已清空试卷', 'success');
+    }
+}
+
+// 导出试卷
+async function exportPaper() {
+    if (cart.length === 0) {
+        showMessage('试卷为空，无法导出', 'error');
+        return;
+    }
+    
+    const mode = document.getElementById('export-mode').value;
+    const format = document.getElementById('export-format').value;
     
     try {
         showLoading(true);
         
-        const response = await fetch(`/api/questions/${questionId}`, {
-            method: 'DELETE'
+        const response = await fetch('/api/export-paper', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                questions: cart,
+                mode: mode,
+                format: format
+            })
         });
         
-        const result = await response.json();
-        
-        if (result.success) {
-            showMessage('题目删除成功！', 'success');
-            loadQuestions(); // 重新加载题目列表
+        if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `试卷_${new Date().getTime()}.${format}`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            showMessage('试卷导出成功！', 'success');
+            closeCartModal();
         } else {
-            showMessage('删除失败: ' + result.message, 'error');
+            const result = await response.json();
+            showMessage('导出失败: ' + result.message, 'error');
         }
     } catch (error) {
-        showMessage('删除失败: ' + error.message, 'error');
+        showMessage('导出失败: ' + error.message, 'error');
     } finally {
         showLoading(false);
-    }
-}
-
-// 显示打标结果预览
-function showTaggingPreview(tags, answer) {
-    // 创建预览容器
-    let previewContainer = document.getElementById('tagging-preview');
-    if (!previewContainer) {
-        previewContainer = document.createElement('div');
-        previewContainer.id = 'tagging-preview';
-        previewContainer.className = 'tagging-preview';
-        previewContainer.innerHTML = `
-            <h4><i class="fas fa-eye"></i> 打标结果预览</h4>
-            <div class="preview-content">
-                <div class="preview-tags">
-                    <strong>标签：</strong>
-                    <div class="preview-tags-list"></div>
-                </div>
-                <div class="preview-answer">
-                    <strong>解答：</strong>
-                    <div class="preview-answer-content"></div>
-                </div>
-            </div>
-        `;
-        
-        // 插入到表单后面
-        const form = document.getElementById('question-form');
-        form.parentNode.insertBefore(previewContainer, form.nextSibling);
-    }
-    
-    // 更新内容
-    const tagsList = previewContainer.querySelector('.preview-tags-list');
-    const answerContent = previewContainer.querySelector('.preview-answer-content');
-    
-    tagsList.innerHTML = tags.map(tag => `<span class="preview-tag">${tag}</span>`).join('');
-    answerContent.innerHTML = renderMathContent(answer);
-    
-    // 重新渲染数学公式
-    renderMath();
-}
-
-// 隐藏打标结果预览
-function hideTaggingPreview() {
-    const previewContainer = document.getElementById('tagging-preview');
-    if (previewContainer) {
-        previewContainer.remove();
     }
 }
 
@@ -924,4 +1129,7 @@ function hideTaggingPreview() {
 window.viewQuestion = viewQuestion;
 window.viewAnswer = viewAnswer;
 window.removeImage = removeImage;
-window.deleteQuestion = deleteQuestion;
+window.addToCart = addToCart;
+window.addParsedToCart = addParsedToCart;
+window.moveCartItem = moveCartItem;
+window.removeFromCart = removeFromCart;
