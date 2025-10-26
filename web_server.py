@@ -371,17 +371,19 @@ def ocr_parse():
             return jsonify({'success': False, 'message': '没有选择文件'}), 400
         
         if file and allowed_file(file.filename):
-            # 保存临时文件
+            # 保存上传的图片到/uplaod/upload_images/
+            if not os.path.exists(os.path.join(app.config['UPLOAD_FOLDER'], 'upload_images')):
+                os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'upload_images'))
             filename = secure_filename(file.filename)
             name, ext = os.path.splitext(filename)
-            temp_filename = f"temp_{uuid.uuid4()}{ext}"
-            temp_path = os.path.join(app.config['UPLOAD_FOLDER'], temp_filename)
-            file.save(temp_path)
+            unique_filename = f"{uuid.uuid4()}{ext}"
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], 'upload_images', unique_filename)
+            file.save(file_path)
             
             try:
                 # 调用OCR
-                logger.log_system_info(f"开始OCR处理 - 文件: {temp_filename}")
-                ocr_result = ocr_client.ocr_image(temp_path)
+                logger.log_system_info(f"开始OCR处理 - 文件: {file_path}")
+                ocr_result = ocr_client.ocr_image(file_path)
                 markdown_content = ocr_result.get('markdown', '')
                 ocr_images = ocr_result.get('images', [])
                 
@@ -442,10 +444,7 @@ def ocr_parse():
                 
             except Exception as e:
                 return jsonify({'success': False, 'message': f'OCR解析失败: {str(e)}'}), 500
-            finally:
-                # 删除临时文件
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
+
         else:
             return jsonify({'success': False, 'message': '不支持的文件类型'}), 400
             

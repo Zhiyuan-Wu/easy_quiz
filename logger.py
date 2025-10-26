@@ -54,17 +54,17 @@ class SystemLogger:
     def log_ocr_result(self, request_id: str, markdown_content: str, images_count: int):
         """记录OCR结果"""
         self.logger.info(f"OCR处理完成 - 请求ID: {request_id}, 内容长度: {len(markdown_content)}, 图片数量: {images_count}")
-        self.logger.debug(f"OCR Markdown内容: {markdown_content[:200]}...")
+        self.logger.info(f"OCR Markdown内容: {markdown_content}...")
     
     def log_llm_prompt(self, prompt: str, context: str = ""):
         """记录大模型提示词"""
         self.logger.info(f"发送大模型请求 - 上下文: {context}")
-        self.logger.debug(f"提示词: {prompt[:500]}...")
+        self.logger.info(f"提示词: {prompt}...")
     
     def log_llm_response(self, response: str, context: str = ""):
         """记录大模型返回结果"""
         self.logger.info(f"大模型响应 - 上下文: {context}, 响应长度: {len(response)}")
-        self.logger.debug(f"大模型响应内容: {response[:500]}...")
+        self.logger.info(f"大模型响应内容: {response}...")
     
     def log_database_operation(self, operation: str, table: str, record_id: Optional[int] = None, details: str = ""):
         """记录数据库操作"""

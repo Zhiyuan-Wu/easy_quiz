@@ -36,20 +36,7 @@ class DeepSeekOCRClient:
 
         result = response.json()
         
-        # 处理图片数据，将bytes转换为base64编码以便传输
-        if 'images' in result and result['images']:
-            import base64
-            processed_images = []
-            for img_data in result['images']:
-                if isinstance(img_data, dict) and 'data' in img_data:
-                    # 将bytes转换为base64字符串
-                    img_data_copy = img_data.copy()
-                    img_data_copy['data'] = base64.b64encode(img_data['data']).decode('utf-8')
-                    processed_images.append(img_data_copy)
-                else:
-                    processed_images.append(img_data)
-            result['images'] = processed_images
-        
+        # OCR服务器已经返回base64编码的图片数据，直接返回
         return result
 
 

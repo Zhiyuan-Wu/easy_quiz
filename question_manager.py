@@ -12,6 +12,7 @@ from typing import List, Dict, Optional, Tuple
 from config import DATABASE_PATH, LLM_CONFIG, QUESTION_TAGS, MAX_QUESTION_LENGTH, MAX_ANSWER_LENGTH
 from openai import OpenAI
 from logger import get_logger
+from json_repair import repair_json
 
 class QuestionManager:
     """高考题目管理器类"""
@@ -257,7 +258,9 @@ class QuestionManager:
             
             # 解析响应
             try:
-                result = json.loads(response)
+                match = re.search(r'\{.*?\}', response, re.DOTALL).group(0)
+                match = repair_json(match)
+                result = json.loads(match)
                 latex_content = result.get('latex_content', content)
                 tags = result.get('tags', [])
                 answer = result.get('answer', '')
@@ -403,7 +406,9 @@ class QuestionManager:
             
             # 解析响应
             try:
-                result = json.loads(response)
+                match = re.search(r'\{.*\}', response, re.DOTALL).group(0)
+                match = repair_json(match)
+                result = json.loads(match)
                 questions = result.get('questions', [])
                 
                 # 验证解析结果
