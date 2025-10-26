@@ -517,11 +517,6 @@ function renderSearchResults() {
                 <button class="btn btn-primary btn-sm" onclick="viewQuestion(${question.id})">
                     <i class="fas fa-eye"></i> 查看详情
                 </button>
-                ${question.reference_answer ? `
-                    <button class="btn btn-secondary btn-sm" onclick="viewAnswer(${question.id})">
-                        <i class="fas fa-lightbulb"></i> 查看解答
-                    </button>
-                ` : ''}
                 <button class="btn btn-add-cart btn-sm" onclick="addToCart(${question.id})">
                     <i class="fas fa-plus"></i> 加入试卷
                 </button>
@@ -585,11 +580,6 @@ function renderQuestionList() {
                 <button class="btn btn-primary btn-sm" onclick="viewQuestion(${question.id})">
                     <i class="fas fa-eye"></i> 查看详情
                 </button>
-                ${question.reference_answer ? `
-                    <button class="btn btn-secondary btn-sm" onclick="viewAnswer(${question.id})">
-                        <i class="fas fa-lightbulb"></i> 查看解答
-                    </button>
-                ` : ''}
                 <button class="btn btn-add-cart btn-sm" onclick="addToCart(${question.id})">
                     <i class="fas fa-plus"></i> 加入试卷
                 </button>
@@ -656,38 +646,6 @@ async function viewQuestion(questionId) {
     }
 }
 
-// 查看解答
-async function viewAnswer(questionId) {
-    try {
-        showLoading(true);
-        
-        const response = await fetch(`/api/questions/${questionId}/answer`);
-        const result = await response.json();
-        
-        if (result.success) {
-            document.getElementById('modal-question-content').innerHTML = `
-                <h4>参考解答</h4>
-                <div class="answer-detail">${renderMathContent(result.answer)}</div>
-            `;
-            
-            document.getElementById('modal-question-tags').innerHTML = '';
-            document.getElementById('modal-question-answer').innerHTML = '';
-            
-            questionModal.style.display = 'block';
-            
-            // 重新渲染数学公式
-            if (window.MathJax) {
-                MathJax.typesetPromise();
-            }
-        } else {
-            showMessage('获取解答失败: ' + result.message, 'error');
-        }
-    } catch (error) {
-        showMessage('获取解答失败: ' + error.message, 'error');
-    } finally {
-        showLoading(false);
-    }
-}
 
 // 关闭模态框
 function closeModal() {
@@ -714,13 +672,39 @@ function updatePagination() {
 function renderMathContent(content) {
     if (!content) return '';
     
-    // 转义HTML特殊字符，但保留LaTeX数学公式
-    let escaped = content
+    // 使用占位符方法避免HTML转义问题
+    let processed = content;
+    
+    // 定义占位符
+    const placeholders = {
+        olStart: '___MATHJAX_OL_START___',
+        olEnd: '___MATHJAX_OL_END___',
+        ulStart: '___MATHJAX_UL_START___',
+        ulEnd: '___MATHJAX_UL_END___',
+        liItem: '___MATHJAX_LI_ITEM___'
+    };
+    
+    // 第一步：将LaTeX环境替换为占位符
+    processed = processed.replace(/\\begin\{enumerate\}/g, placeholders.olStart);
+    processed = processed.replace(/\\end\{enumerate\}/g, placeholders.olEnd);
+    processed = processed.replace(/\\begin\{itemize\}/g, placeholders.ulStart);
+    processed = processed.replace(/\\end\{itemize\}/g, placeholders.ulEnd);
+    processed = processed.replace(/\\item\s*/g, placeholders.liItem);
+    
+    // 第二步：转义HTML特殊字符
+    let escaped = processed
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#x27;');
+    
+    // 第三步：将占位符替换为HTML标签
+    escaped = escaped.replace(new RegExp(placeholders.olStart, 'g'), '<ol class="math-enumerate">');
+    escaped = escaped.replace(new RegExp(placeholders.olEnd, 'g'), '</ol>');
+    escaped = escaped.replace(new RegExp(placeholders.ulStart, 'g'), '<ul class="math-itemize">');
+    escaped = escaped.replace(new RegExp(placeholders.ulEnd, 'g'), '</ul>');
+    escaped = escaped.replace(new RegExp(placeholders.liItem, 'g'), '<li class="math-item">');
     
     // 处理换行
     escaped = escaped.replace(/\n/g, '<br>');
@@ -916,7 +900,10 @@ function renderParsedQuestions() {
         
         return `
             <div class="parsed-question-item">
-                <h5>题目 ${index + 1}</h5>
+                <h5>
+                    <input type="checkbox" checked data-index="${index}" style="margin-right: 10px;">
+                    题目 ${index + 1}
+                </h5>
                 <div class="parsed-question-content">
                     ${renderMathContent(questionText)}
                 </div>
@@ -956,13 +943,23 @@ async function handleBatchSave() {
         return;
     }
     
+    // 获取选中的题目索引
+    const checkedBoxes = document.querySelectorAll('#parsed-questions-list input[type="checkbox"]:checked');
+    const selectedIndices = Array.from(checkedBoxes).map(cb => parseInt(cb.dataset.index));
+    
+    if (selectedIndices.length === 0) {
+        showMessage('请至少选择一个题目', 'error');
+        return;
+    }
+    
     const visibility = document.querySelector('input[name="ocr-visibility"]:checked').value;
     
     try {
         showLoading(true);
         let successCount = 0;
         
-        for (const question of parsedQuestions) {
+        for (const index of selectedIndices) {
+            const question = parsedQuestions[index];
             const response = await fetch('/api/questions', {
                 method: 'POST',
                 headers: {
@@ -1132,8 +1129,9 @@ async function exportPaper() {
         return;
     }
     
-    const mode = document.getElementById('export-mode').value;
-    const format = document.getElementById('export-format').value;
+    const title = document.getElementById('export-title').value || '数学试卷';
+    const mode = document.querySelector('input[name="export-mode"]:checked').value;
+    const format = document.querySelector('input[name="export-format"]:checked').value;
     
     try {
         showLoading(true);
@@ -1145,6 +1143,7 @@ async function exportPaper() {
             },
             body: JSON.stringify({
                 questions: cart,
+                title: title,
                 mode: mode,
                 format: format
             })
@@ -1207,7 +1206,6 @@ async function deleteQuestion(questionId) {
 
 // 全局函数，供HTML调用
 window.viewQuestion = viewQuestion;
-window.viewAnswer = viewAnswer;
 window.removeImage = removeImage;
 window.addToCart = addToCart;
 window.addParsedToCart = addParsedToCart;

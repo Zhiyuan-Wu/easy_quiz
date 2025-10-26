@@ -4,3 +4,4 @@ uploads
 .env
 *.png
 log.txt
+cookies.txt

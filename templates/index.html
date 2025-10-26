@@ -12,7 +12,8 @@
                 inlineMath: [['$', '$'], ['\\(', '\\)']],
                 displayMath: [['$$', '$$'], ['\\[', '\\]']],
                 processEscapes: true,
-                processEnvironments: true
+                processEnvironments: true,
+                packages: ['base', 'ams', 'noerrors', 'noundefined']
             },
             options: {
                 skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
@@ -35,7 +36,7 @@
                 </div>
                 <div class="status-item">
                     <i class="fas fa-user"></i>
-                    <span>用户: <strong id="current-username">-</strong></span>
+                    <span>用户: <strong id="current-username" style="cursor: pointer; color: #3498db;" onclick="window.location.href='/profile'">-</strong></span>
                 </div>
                 <div class="status-item cart-icon" id="cart-icon" title="生成试卷">
                     <i class="fas fa-shopping-cart"></i>
@@ -304,19 +305,38 @@
                     <div class="export-options">
                         <h4>导出选项</h4>
                         <div class="form-group">
+                            <label for="export-title">试卷标题</label>
+                            <input type="text" id="export-title" class="export-input" value="数学试卷" placeholder="请输入试卷标题">
+                        </div>
+                        <div class="form-group">
                             <label>导出模式</label>
-                            <select id="export-mode" class="export-select">
-                                <option value="questions">仅试题</option>
-                                <option value="with-answers">试题 + 解析答案</option>
-                            </select>
+                            <div class="radio-group">
+                                <label class="radio-item">
+                                    <input type="radio" name="export-mode" value="questions" checked>
+                                    <span>仅试题</span>
+                                </label>
+                                <label class="radio-item">
+                                    <input type="radio" name="export-mode" value="with-answers">
+                                    <span>试题 + 解析答案</span>
+                                </label>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>导出格式</label>
-                            <select id="export-format" class="export-select">
-                                <option value="latex">LaTeX</option>
-                                <option value="docx">Word (DOCX)</option>
-                                <option value="pdf">PDF</option>
-                            </select>
+                            <div class="radio-group">
+                                <label class="radio-item">
+                                    <input type="radio" name="export-format" value="latex" checked>
+                                    <span>LaTeX</span>
+                                </label>
+                                <label class="radio-item">
+                                    <input type="radio" name="export-format" value="docx">
+                                    <span>Word (DOCX)</span>
+                                </label>
+                                <label class="radio-item">
+                                    <input type="radio" name="export-format" value="pdf">
+                                    <span>PDF</span>
+                                </label>
+                            </div>
                         </div>
                     </div>
                     <div class="cart-buttons">

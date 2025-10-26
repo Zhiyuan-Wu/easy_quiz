@@ -5,7 +5,7 @@
 
 # 数据库配置
 DATABASE_PATH = "question_database.db"
-USER_DATABASE_PATH = "users.db"
+SYSTEM_DATABASE_PATH = "system.db"
 
 # Session配置
 SECRET_KEY = "your-secret-key-change-this-in-production"

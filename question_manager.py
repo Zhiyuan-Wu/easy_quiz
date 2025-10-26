@@ -9,7 +9,7 @@ import requests
 import re
 import time
 from typing import List, Dict, Optional, Tuple
-from config import DATABASE_PATH, LLM_CONFIG, QUESTION_TAGS, MAX_QUESTION_LENGTH, MAX_ANSWER_LENGTH
+from config import DATABASE_PATH, LLM_CONFIG, MAX_QUESTION_LENGTH, MAX_ANSWER_LENGTH
 from openai import OpenAI
 from logger import get_logger
 from json_repair import repair_json
@@ -17,14 +17,16 @@ from json_repair import repair_json
 class QuestionManager:
     """高考题目管理器类"""
     
-    def __init__(self, db_path: str = DATABASE_PATH):
+    def __init__(self, db_path: str = DATABASE_PATH, system_manager=None):
         """
         初始化题目管理器
         
         Args:
             db_path: 数据库文件路径
+            system_manager: 系统管理器实例
         """
         self.db_path = db_path
+        self.system_manager = system_manager
         self.llm_client = OpenAI(api_key=LLM_CONFIG["api_key"],base_url=LLM_CONFIG["api_url"])
         self.logger = get_logger()
         self.init_database()
@@ -196,19 +198,6 @@ class QuestionManager:
             return self._row_to_dict(row)
         return None
     
-    def get_reference_answer(self, question_id: int, current_user_id: int = None) -> Optional[str]:
-        """
-        获取题目的参考解答（考虑可见性）
-        
-        Args:
-            question_id: 题目ID
-            current_user_id: 当前用户ID
-            
-        Returns:
-            参考解答，如果不存在或无权访问返回None
-        """
-        question = self.get_question_by_id(question_id, current_user_id)
-        return question['reference_answer'] if question else None
     
     def auto_tag_and_answer(self, content: str, source: str = None) -> Tuple[List[str], str, str]:
         """
@@ -224,12 +213,18 @@ class QuestionManager:
         start_time = time.time()
         
         try:
+            # 获取当前可用的标签
+            available_tags = []
+            if self.system_manager:
+                tags = self.system_manager.get_all_tags(limit=50)
+                available_tags = [tag['name'] for tag in tags]
+            
             # 构建提示词
             prompt = f"""
 请分析以下高考数学题目，并完成以下任务：
 
 1. 将题目内容格式化为标准的LaTeX格式，确保数学公式、符号、格式都正确
-2. 从以下标签中选择1-3个最符合的标签：{', '.join(QUESTION_TAGS)}
+2. 请给这个题目所涉及的知识点打上几个标签，可以参考以下标签：{', '.join(available_tags) if available_tags else '立体几何, 导数题, 极值点偏移, 三角函数, 数列, 概率统计, 解析几何, 函数与方程, 不等式, 向量, 复数, 算法与程序框图'}
 3. 生成详细的参考解答
 
 题目内容：
@@ -265,8 +260,16 @@ class QuestionManager:
                 tags = result.get('tags', [])
                 answer = result.get('answer', '')
                 
-                # 验证标签是否在允许的标签列表中
-                valid_tags = [tag for tag in tags if tag in QUESTION_TAGS]
+                # 验证标签并添加到数据库
+                valid_tags = []
+                for tag in tags:
+                    if self.system_manager:
+                        # 添加标签到数据库（如果不存在则创建，存在则增加使用计数）
+                        self.system_manager.add_tag(tag)
+                        valid_tags.append(tag)
+                    else:
+                        # 如果没有系统管理器，直接使用标签
+                        valid_tags.append(tag)
                 
                 duration = time.time() - start_time
                 self.logger.log_performance("自动打标和LaTeX格式化", duration, f"标签数量: {len(valid_tags)}")
@@ -275,74 +278,11 @@ class QuestionManager:
                 
             except json.JSONDecodeError as e:
                 self.logger.log_error(e, "JSON解析失败 - 自动打标")
-                # 如果JSON解析失败，尝试从文本中提取信息
-                tags = self._extract_tags_from_text(response)
-                answer = self._extract_answer_from_text(response)
-                return tags, answer, content
+                raise e
                 
         except Exception as e:
             self.logger.log_error(e, "自动打标失败")
             return [], "自动生成解答失败，请手动输入", content
-    
-    def _call_llm_api(self, prompt: str) -> str:
-        """
-        调用大语言模型API
-        
-        Args:
-            prompt: 提示词
-            
-        Returns:
-            API响应内容
-        """
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {LLM_CONFIG["api_key"]}'
-        }
-        
-        data = {
-            'model': LLM_CONFIG['model'],
-            'messages': [
-                {'role': 'user', 'content': prompt}
-            ],
-            'max_tokens': LLM_CONFIG['max_tokens'],
-            'temperature': LLM_CONFIG['temperature']
-        }
-        
-        response = requests.post(
-            LLM_CONFIG['api_url'],
-            headers=headers,
-            json=data,
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            return result['choices'][0]['message']['content']
-        else:
-            raise Exception(f"API调用失败: {response.status_code} - {response.text}")
-    
-    def _extract_tags_from_text(self, text: str) -> List[str]:
-        """从文本中提取标签"""
-        tags = []
-        for tag in QUESTION_TAGS:
-            if tag in text:
-                tags.append(tag)
-        return tags
-    
-    def _extract_answer_from_text(self, text: str) -> str:
-        """从文本中提取答案"""
-        # 简单的文本提取逻辑，可以根据需要优化
-        lines = text.split('\n')
-        answer_lines = []
-        in_answer = False
-        
-        for line in lines:
-            if '解答' in line or '答案' in line or '解：' in line:
-                in_answer = True
-            if in_answer and line.strip():
-                answer_lines.append(line.strip())
-        
-        return '\n'.join(answer_lines) if answer_lines else text
     
     def parse_exam_paper(self, markdown_content: str, image_filename_mapping: Dict[str, str] = None) -> List[Dict]:
         """
@@ -364,6 +304,12 @@ class QuestionManager:
                 available_filenames = list(image_filename_mapping.keys())
                 images_info = f"\n可用的图片文件：{', '.join(available_filenames)}"
             
+            # 获取当前可用的标签
+            available_tags = []
+            if self.system_manager:
+                tags = self.system_manager.get_all_tags(limit=50)
+                available_tags = [tag['name'] for tag in tags]
+            
             prompt = f"""
 请分析以下试卷内容，提取所有题目并格式化为LaTeX格式。
 
@@ -375,7 +321,7 @@ class QuestionManager:
 2. 识别并分离每道题目
 3. 将题目内容转换为LaTeX格式，选择题选项优先使用enumerate环境
 4. 识别题目中引用的图片（如果有），从可用图片列表中选择合适的图片
-5. 为每道题目自动打标并生成解答
+5. 为每道题目生成其所考察的知识点标签并生成解答，标签可以参考：{', '.join(available_tags) if available_tags else '立体几何, 导数题, 极值点偏移, 三角函数, 数列, 概率统计, 解析几何, 函数与方程, 不等式, 向量, 复数, 算法与程序框图'}
 6. 返回JSON格式，包含题目列表
 
 请按以下JSON格式回复：

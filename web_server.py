@@ -12,8 +12,9 @@ import time
 from werkzeug.utils import secure_filename
 from question_manager import QuestionManager
 from ocr_client import DeepSeekOCRClient
-from user_manager import UserManager
-from config import WEB_CONFIG, QUESTION_TAGS, OCR_BASE_URL, LLM_CONFIG, SECRET_KEY, USER_DATABASE_PATH
+from system_manager import SystemManager
+from export_renderer import ExportRenderer
+from config import WEB_CONFIG, OCR_BASE_URL, LLM_CONFIG, SECRET_KEY, SYSTEM_DATABASE_PATH
 from logger import get_logger
 
 app = Flask(__name__)
@@ -32,14 +33,17 @@ if not os.path.exists(UPLOAD_FOLDER):
 # 初始化日志记录器
 logger = get_logger()
 
+# 初始化系统管理器
+system_manager = SystemManager(SYSTEM_DATABASE_PATH)
+
 # 初始化题目管理器
-question_manager = QuestionManager()
+question_manager = QuestionManager(system_manager=system_manager)
 
 # 初始化OCR客户端
 ocr_client = DeepSeekOCRClient(OCR_BASE_URL)
 
-# 初始化用户管理器
-user_manager = UserManager(USER_DATABASE_PATH)
+# 初始化导出渲染器
+export_renderer = ExportRenderer(UPLOAD_FOLDER)
 
 # 登录验证装饰器
 def login_required(f):
@@ -57,8 +61,15 @@ def allowed_file(filename):
 @login_required
 def index():
     """主页"""
-    user = user_manager.get_user_by_id(session['user_id'])
+    user = system_manager.get_user_by_id(session['user_id'])
     return render_template('index.html', user=user)
+
+@app.route('/profile')
+@login_required
+def profile():
+    """用户中心页面"""
+    user = system_manager.get_user_by_id(session['user_id'])
+    return render_template('user_profile.html', user=user)
 
 @app.route('/login')
 def login_page():
@@ -74,7 +85,7 @@ def register():
         password = data.get('password')
         email = data.get('email')
         
-        success, message = user_manager.register_user(username, password, email)
+        success, message = system_manager.register_user(username, password, email)
         
         return jsonify({
             'success': success,
@@ -91,7 +102,7 @@ def login():
         username = data.get('username')
         password = data.get('password')
         
-        user = user_manager.authenticate_user(username, password)
+        user = system_manager.authenticate_user(username, password)
         
         if user:
             session['user_id'] = user['id']
@@ -119,7 +130,7 @@ def logout():
 @login_required
 def get_current_user():
     """获取当前登录用户信息API"""
-    user = user_manager.get_user_by_id(session['user_id'])
+    user = system_manager.get_user_by_id(session['user_id'])
     if user:
         return jsonify({
             'success': True,
@@ -263,27 +274,6 @@ def get_question(question_id):
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
-@app.route('/api/questions/<int:question_id>/answer', methods=['GET'])
-@login_required
-def get_question_answer(question_id):
-    """获取题目参考解答API"""
-    try:
-        current_user_id = session['user_id']
-        answer = question_manager.get_reference_answer(question_id, current_user_id)
-        
-        if answer:
-            return jsonify({
-                'success': True,
-                'answer': answer
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'message': '参考解答不存在或无权访问'
-            }), 404
-            
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/questions/stats', methods=['GET'])
 @login_required
@@ -454,10 +444,15 @@ def ocr_parse():
 @app.route('/api/tags', methods=['GET'])
 def get_tags():
     """获取所有可用标签API"""
-    return jsonify({
-        'success': True,
-        'tags': QUESTION_TAGS
-    })
+    try:
+        tags = system_manager.get_all_tags(limit=20)
+        tag_names = [tag['name'] for tag in tags]
+        return jsonify({
+            'success': True,
+            'tags': tag_names
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/export-paper', methods=['POST'])
 @login_required
@@ -466,23 +461,35 @@ def export_paper():
     try:
         data = request.get_json()
         questions = data.get('questions', [])
+        title = data.get('title', '数学试卷')
         mode = data.get('mode', 'questions')  # questions 或 with-answers
         format_type = data.get('format', 'latex')  # latex, docx, 或 pdf
         
         if not questions:
             return jsonify({'success': False, 'message': '没有题目可导出'}), 400
         
+        # 保存导出历史
+        question_ids = [q.get('id') for q in questions if q.get('id')]
+        if question_ids:
+            system_manager.save_export_history(
+                user_id=session['user_id'],
+                title=title,
+                question_ids=question_ids,
+                export_format=format_type,
+                export_mode=mode
+            )
+        
         # 生成文件内容
         if format_type == 'latex':
-            content = generate_latex_paper(questions, mode)
+            content = export_renderer.render_latex(questions, mode, title)
             mimetype = 'text/plain'
-            filename = f'paper_{uuid.uuid4().hex[:8]}.tex'
+            filename = f'{title}_{uuid.uuid4().hex[:8]}.tex'
         elif format_type == 'docx':
-            file_path = generate_docx_paper(questions, mode)
+            file_path = export_renderer.render_docx(questions, mode, title)
             return send_from_directory(os.path.dirname(file_path), os.path.basename(file_path), 
                                      as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
         elif format_type == 'pdf':
-            file_path = generate_pdf_paper(questions, mode)
+            file_path = export_renderer.render_pdf(questions, mode, title)
             return send_from_directory(os.path.dirname(file_path), os.path.basename(file_path), 
                                      as_attachment=True, mimetype='application/pdf')
         else:
@@ -499,118 +506,65 @@ def export_paper():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
-def generate_latex_paper(questions, mode):
-    """生成LaTeX格式试卷"""
-    content = r"""\documentclass[12pt,a4paper]{article}
-\usepackage{ctex}
-\usepackage{amsmath}
-\usepackage{amssymb}
-\usepackage{geometry}
-\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+@app.route('/api/user/exports', methods=['GET'])
+@login_required
+def get_user_exports():
+    """获取用户导出记录API"""
+    try:
+        user_id = session['user_id']
+        exports = system_manager.get_export_history(user_id, limit=50)
+        return jsonify({
+            'success': True,
+            'exports': exports
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
 
-\title{试卷}
-\author{}
-\date{\today}
+@app.route('/api/user/reset-password', methods=['POST'])
+@login_required
+def reset_password():
+    """重置密码API"""
+    try:
+        data = request.get_json()
+        user_id = session['user_id']
+        old_password = data.get('old_password')
+        new_password = data.get('new_password')
+        
+        success, message = system_manager.update_password(user_id, old_password, new_password)
+        
+        return jsonify({
+            'success': success,
+            'message': message
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
 
-\begin{document}
-\maketitle
+@app.route('/api/user/re-export/<int:export_id>', methods=['GET'])
+@login_required
+def get_re_export_data(export_id):
+    """获取重新导出数据API"""
+    try:
+        user_id = session['user_id']
+        export_data = system_manager.get_export_by_id(export_id)
+        
+        if not export_data or export_data['user_id'] != user_id:
+            return jsonify({'success': False, 'message': '导出记录不存在或无权访问'}), 404
+        
+        # 根据题目ID获取题目详情
+        questions = []
+        for question_id in export_data['question_ids']:
+            question = question_manager.get_question_by_id(question_id, user_id)
+            if question:
+                questions.append(question)
+        
+        return jsonify({
+            'success': True,
+            'export': export_data,
+            'questions': questions
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
 
-"""
-    
-    # 添加题目
-    for i, q in enumerate(questions, 1):
-        content += f"\\section*{{题目 {i}}}\n\n"
-        content += q['latex_content'] + "\n\n"
-        
-        if mode == 'with-answers' and q.get('reference_answer'):
-            content += "\\subsection*{参考解答}\n\n"
-            content += q['reference_answer'] + "\n\n"
-    
-    content += r"\end{document}"
-    return content
-
-def generate_docx_paper(questions, mode):
-    """生成Word格式试卷"""
-    from docx import Document
-    from docx.shared import Pt, Inches
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    
-    doc = Document()
-    
-    # 标题
-    title = doc.add_heading('试卷', 0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    # 添加题目
-    for i, q in enumerate(questions, 1):
-        doc.add_heading(f'题目 {i}', level=1)
-        
-        # 题目内容
-        p = doc.add_paragraph(q['latex_content'])
-        
-        # 如果包含答案
-        if mode == 'with-answers' and q.get('reference_answer'):
-            doc.add_heading('参考解答', level=2)
-            doc.add_paragraph(q['reference_answer'])
-        
-        # 添加分隔
-        if i < len(questions):
-            doc.add_paragraph()
-    
-    # 保存文件
-    filename = f'paper_{uuid.uuid4().hex[:8]}.docx'
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    doc.save(file_path)
-    
-    return file_path
-
-def generate_pdf_paper(questions, mode):
-    """生成PDF格式试卷"""
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-    
-    filename = f'paper_{uuid.uuid4().hex[:8]}.pdf'
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    
-    doc = SimpleDocTemplate(file_path, pagesize=A4)
-    story = []
-    
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=24,
-        alignment=1
-    )
-    
-    # 标题
-    story.append(Paragraph('试卷', title_style))
-    story.append(Spacer(1, 0.5 * inch))
-    
-    # 添加题目
-    for i, q in enumerate(questions, 1):
-        story.append(Paragraph(f'<b>题目 {i}</b>', styles['Heading2']))
-        story.append(Spacer(1, 0.2 * inch))
-        
-        # 题目内容（简化处理LaTeX）
-        content = q['latex_content'].replace('$', '').replace('\\', '')
-        story.append(Paragraph(content, styles['Normal']))
-        
-        # 如果包含答案
-        if mode == 'with-answers' and q.get('reference_answer'):
-            story.append(Spacer(1, 0.2 * inch))
-            story.append(Paragraph('<b>参考解答</b>', styles['Heading3']))
-            answer = q['reference_answer'].replace('$', '').replace('\\', '')
-            story.append(Paragraph(answer, styles['Normal']))
-        
-        story.append(Spacer(1, 0.5 * inch))
-    
-    doc.build(story)
-    return file_path
 
 @app.errorhandler(404)
 def not_found(error):
