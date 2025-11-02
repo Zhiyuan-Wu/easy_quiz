@@ -13,7 +13,7 @@ SECRET_KEY = "your-secret-key-change-this-in-production"
 # 大语言模型配置
 LLM_CONFIG = {
     "api_url": "https://api.deepseek.com",  # 替换为实际的API地址
-    "api_key": "sk-7027575dc0a64e3e9c726fe39195cc31",  # 替换为实际的API密钥
+    "api_key": "your-api-key",  # 替换为实际的API密钥
     "model": "deepseek-chat",  # 或使用其他模型
     "temperature": 0.7,
     "max_tokens": 4000
