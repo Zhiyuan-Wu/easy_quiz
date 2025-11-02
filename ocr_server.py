@@ -46,25 +46,6 @@ def home():
     <p>Example: <code>curl -F "file=@image.png" http://localhost:5000/ocr</code></p>
     """, 200
 
-# OCR调试用接口，读取本地已有结果并固定返回a9fad0c3-9303-4326-a230-3be6cf801678下的结果
-@app.route('/ocr/test', methods=['POST'])
-def ocr_test_endpoint():
-    request_id = 'a9fad0c3-9303-4326-a230-3be6cf801678'
-    request_dir = RESULT_BASE / request_id
-    if not request_dir.exists():
-        return jsonify({"error": "Request ID not found"}), 404
-    with open(request_dir / "result.mmd", 'r', encoding='utf-8') as f:
-        markdown_content = f.read()
-    image_data = []
-    images_dir = request_dir / "images"
-    for img_file in sorted(images_dir.glob("*.jpg")):
-        with open(img_file, 'rb') as f:
-            image_data.append({
-                "filename": "images/" + img_file.name,
-                "data": base64.b64encode(f.read()).decode('utf-8')
-            })
-    return jsonify({"request_id": request_id, "markdown": markdown_content, "images": image_data})
-
 # OCR 接口
 @app.route('/ocr', methods=['POST'])
 def ocr_endpoint():
@@ -101,13 +82,13 @@ def ocr_endpoint():
             for img_file in sorted(images_dir.glob("*.jpg")):
                 with open(img_file, 'rb') as f:
                     image_data.append({
-                        "filename": "images/" + img_file.name,
+                        "filename": img_file.name,
                         "data": base64.b64encode(f.read()).decode('utf-8')
                     })
             for img_file in sorted(images_dir.glob("*.png")):
                 with open(img_file, 'rb') as f:
                     image_data.append({
-                        "filename": "images/" + img_file.name,
+                        "filename": img_file.name,
                         "data": base64.b64encode(f.read()).decode('utf-8')
                     })
         

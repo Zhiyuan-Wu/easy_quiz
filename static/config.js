@@ -5,7 +5,7 @@ const APP_CONFIG = {
     // 试卷解析进度条配置
     parsingProgress: {
         interval: 200,        // 进度更新间隔（毫秒）
-        increment: 2,         // 每次增加的百分比
+        increment: 0.175,         // 每次增加的百分比
         maxProgress: 99       // 最大进度值（达到此值后停止）
     },
     
