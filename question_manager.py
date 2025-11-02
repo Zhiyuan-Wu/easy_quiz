@@ -46,8 +46,9 @@ class QuestionManager:
         self.embedding_cache = {}  # question_id -> embedding vector
         self._load_embedding_cache()
         
-        # 异步任务锁
+        # 异步任务锁和正在处理的question_id集合
         self._async_task_lock = threading.Lock()
+        self._processing_question_ids = set()  # 正在计算embedding的question_id集合
     
     def init_database(self):
         """初始化数据库表结构"""
@@ -150,13 +151,15 @@ class QuestionManager:
     def _compute_missing_embeddings_async(self, question_ids: List[int], current_user_id: int = None):
         """异步计算缺失的embedding"""
         def compute_task():
+            processed_ids = set()  # 记录成功处理的question_id
             try:
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
                 
                 for question_id in question_ids:
-                    # 检查是否已有embedding
+                    # 再次检查是否已有embedding（防止并发情况）
                     if question_id in self.embedding_cache:
+                        processed_ids.add(question_id)
                         continue
                     
                     # 获取题目信息
@@ -167,6 +170,7 @@ class QuestionManager:
                     
                     row = cursor.fetchone()
                     if not row:
+                        processed_ids.add(question_id)  # 题目不存在，也标记为已处理，避免重复尝试
                         continue
                     
                     question = self._row_to_dict(row)
@@ -176,13 +180,22 @@ class QuestionManager:
                     try:
                         embeddings = self.ocr_client.get_embeddings([question_text])
                         if embeddings and len(embeddings) > 0:
-                            self._save_embedding_to_cache(question_id, embeddings[0])
+                            # 再次检查是否已有embedding（防止在计算过程中被其他线程写入）
+                            if question_id not in self.embedding_cache:
+                                self._save_embedding_to_cache(question_id, embeddings[0])
+                            processed_ids.add(question_id)
                     except Exception as e:
                         self.logger.log_error(e, f"计算embedding失败 - question_id: {question_id}")
+                        processed_ids.add(question_id)  # 即使失败也标记为已处理，避免重复尝试
                 
                 conn.close()
             except Exception as e:
                 self.logger.log_error(e, "异步计算embedding任务失败")
+            finally:
+                # 从正在处理的集合中移除本次任务处理的question_id
+                with self._async_task_lock:
+                    # 移除已处理的ID（包括成功和失败的）
+                    self._processing_question_ids.difference_update(question_ids)
         
         # 在后台线程中执行
         thread = threading.Thread(target=compute_task)
@@ -710,7 +723,16 @@ class QuestionManager:
             # 只计算可见题目的embedding
             visible_missing_ids = [qid for qid in missing_embedding_ids if qid in all_question_ids]
             if visible_missing_ids:
-                self._compute_missing_embeddings_async(visible_missing_ids, current_user_id)
+                # 过滤掉正在处理的question_id，避免重复任务
+                with self._async_task_lock:
+                    new_missing_ids = [qid for qid in visible_missing_ids 
+                                     if qid not in self._processing_question_ids 
+                                     and qid not in self.embedding_cache]
+                    # 标记这些question_id为正在处理
+                    self._processing_question_ids.update(new_missing_ids)
+                
+                if new_missing_ids:
+                    self._compute_missing_embeddings_async(new_missing_ids, current_user_id)
         
         # 6. 返回合并后的结果列表
         results = list(result_dict.values())
