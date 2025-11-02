@@ -12,11 +12,13 @@ import os
 import threading
 import numpy as np
 from typing import List, Dict, Optional, Tuple
-from config import DATABASE_PATH, LLM_CONFIG, MAX_QUESTION_LENGTH, MAX_ANSWER_LENGTH
+from config import DATABASE_PATH, LLM_CONFIG, MAX_QUESTION_LENGTH, MAX_ANSWER_LENGTH, EMBEDDING_CACHE_PATH
 from openai import OpenAI
 from logger import get_logger
 from json_repair import repair_json
 from ocr_client import DeepSeekOCRClient
+
+import faiss
 
 class QuestionManager:
     """高考题目管理器类"""
@@ -36,8 +38,11 @@ class QuestionManager:
         self.ocr_client = DeepSeekOCRClient()
         self.init_database()
         
-        # Embedding缓存文件路径
-        self.embedding_cache_path = "embeddings_cache.jsonl"
+        # Embedding缓存文件路径（使用配置）
+        cache_dir = os.path.dirname(EMBEDDING_CACHE_PATH)
+        if cache_dir and not os.path.exists(cache_dir):
+            os.makedirs(cache_dir, exist_ok=True)
+        self.embedding_cache_path = EMBEDDING_CACHE_PATH
         self.embedding_cache = {}  # question_id -> embedding vector
         self._load_embedding_cache()
         
@@ -92,7 +97,9 @@ class QuestionManager:
                     for line in f:
                         if line.strip():
                             item = json.loads(line.strip())
-                            self.embedding_cache[item['question_id']] = item['embedding']
+                            question_id = item['question_id']
+                            embedding = item['embedding']
+                            self.embedding_cache[question_id] = embedding
             except Exception as e:
                 self.logger.log_error(e, "加载embedding缓存失败")
                 self.embedding_cache = {}
@@ -106,8 +113,9 @@ class QuestionManager:
                     'embedding': embedding
                 }
                 f.write(json.dumps(item, ensure_ascii=False) + '\n')
-                # 同时更新内存缓存
-                self.embedding_cache[question_id] = embedding
+            
+            # 更新内存缓存
+            self.embedding_cache[question_id] = embedding
         except Exception as e:
             self.logger.log_error(e, f"保存embedding缓存失败 - question_id: {question_id}")
     
@@ -623,6 +631,7 @@ class QuestionManager:
         
         # 3. Embedding搜索（如果有关键词）
         embedding_questions = []
+        embedding_similarity_map = {}  # question_id -> similarity
         missing_embedding_ids = []
         
         if keyword:
@@ -635,23 +644,55 @@ class QuestionManager:
                 query_embeddings = self.ocr_client.get_embeddings([query_text])
                 if query_embeddings and len(query_embeddings) > 0:
                     query_embedding = query_embeddings[0]
+                    query_embedding_array = np.array([query_embedding], dtype='float32')
                     
-                    # 计算相似度
-                    similarities = []
-                    for question in all_visible_questions:
-                        question_id = question['id']
-                        
-                        # 检查是否有缓存
+                    # 动态构建faiss索引（仅包含可见题目且有embedding的）
+                    visible_question_ids = [q['id'] for q in all_visible_questions]
+                    visible_embeddings = []
+                    visible_question_id_list = []
+                    
+                    for question_id in visible_question_ids:
                         if question_id in self.embedding_cache:
-                            question_embedding = self.embedding_cache[question_id]
-                            similarity = self._compute_cosine_similarity(query_embedding, question_embedding)
-                            similarities.append((similarity, question))
+                            visible_embeddings.append(self.embedding_cache[question_id])
+                            visible_question_id_list.append(question_id)
                         else:
                             missing_embedding_ids.append(question_id)
                     
-                    # 按相似度排序，取top k
-                    similarities.sort(key=lambda x: x[0], reverse=True)
-                    embedding_questions = [q for _, q in similarities[:k]]
+                    if len(visible_embeddings) > 0:
+                        try:
+                            # 构建临时faiss索引
+                            embeddings_array = np.array(visible_embeddings, dtype='float32')
+                            dimension = embeddings_array.shape[1]
+                            temp_index = faiss.IndexFlatL2(dimension)
+                            temp_index.add(embeddings_array)
+                            
+                            # 使用faiss搜索top k个最相似的embedding
+                            k_search = min(k * 2, len(visible_embeddings))
+                            distances, indices = temp_index.search(query_embedding_array, k_search)
+                            
+                            # 将L2距离转换为相似度分数
+                            similarities = []
+                            similarity_map = {}  # question_id -> similarity，用于后续排序
+                            visible_question_dict = {q['id']: q for q in all_visible_questions}
+                            
+                            for idx, dist in zip(indices[0], distances[0]):
+                                if idx < len(visible_question_id_list):
+                                    question_id = visible_question_id_list[idx]
+                                    if question_id in visible_question_dict:
+                                        # L2距离转换为相似度（使用负距离，越小越好）
+                                        similarity = -float(dist)
+                                        question = visible_question_dict[question_id]
+                                        similarities.append((similarity, question))
+                                        similarity_map[question_id] = similarity
+                            
+                            # 按相似度排序，取top k
+                            similarities.sort(key=lambda x: x[0], reverse=True)
+                            embedding_questions = [q for _, q in similarities[:k]]
+                            embedding_similarity_map = similarity_map  # 保存similarity映射
+                        except Exception as e:
+                            self.logger.log_error(e, "Faiss搜索失败")
+                            embedding_questions = []
+                            embedding_similarity_map = {}
             except Exception as e:
                 self.logger.log_error(e, "Embedding搜索失败")
         
@@ -674,18 +715,25 @@ class QuestionManager:
         # 6. 返回合并后的结果列表
         results = list(result_dict.values())
         
-        # 优先显示关键词匹配的题目，然后是embedding匹配的
+        # 优先显示关键词匹配的题目，然后是embedding匹配的（按相似度排序）
+        keyword_question_ids = {q['id'] for q in keyword_questions}
+        embedding_question_ids = {q['id'] for q in embedding_questions}
+        
         def sort_key(q):
-            in_keyword = q['id'] in [q2['id'] for q2 in keyword_questions]
-            in_embedding = q['id'] in [q2['id'] for q2 in embedding_questions]
+            q_id = q['id']
+            in_keyword = q_id in keyword_question_ids
+            in_embedding = q_id in embedding_question_ids
+            
             if in_keyword and in_embedding:
-                return 0  # 两种都匹配，优先级最高
+                return (0, 0)  # 两种都匹配，优先级最高
             elif in_keyword:
-                return 1  # 只关键词匹配
+                return (1, 0)  # 只关键词匹配
             elif in_embedding:
-                return 2  # 只embedding匹配
+                # 使用similarity排序，相似度越高（值越大）越靠前，所以使用负值
+                similarity = embedding_similarity_map.get(q_id, 0)
+                return (2, -similarity)  # 只embedding匹配，按相似度排序
             else:
-                return 3
+                return (3, 0)
         
         results.sort(key=sort_key)
         

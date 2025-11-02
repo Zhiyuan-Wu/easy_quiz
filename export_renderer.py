@@ -5,6 +5,8 @@
 
 import os
 import uuid
+import base64
+import requests
 from datetime import datetime
 from typing import List, Dict
 from docx import Document
@@ -15,6 +17,7 @@ from docx.oxml.shared import OxmlElement, qn
 from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
 import re
+from config import LATEX_COMPILE_CONFIG
 try:
     from latex2mathml.converter import convert as latex_to_mathml
     LATEX2MATHML_AVAILABLE = True
@@ -79,13 +82,25 @@ class ExportRenderer:
             latex_content = self._clean_latex_content(question.get('latex_content', ''))
             content += latex_content + "\n\n"
             
-            # 处理图片
+            # 处理图片（需要转换为绝对路径或相对路径）
             images = question.get('image', [])
             for img_path in images:
-                if img_path and os.path.exists(img_path.replace('/uploads/', self.upload_folder + '/')):
-                    content += f"\\begin{{center}}\n"
-                    content += f"\\includegraphics[width=0.8\\textwidth]{{{img_path}}}\n"
-                    content += f"\\end{{center}}\n\n"
+                if img_path:
+                    # 处理图片路径：如果是以/uploads/开头，需要转换为实际文件路径
+                    if img_path.startswith('/uploads/'):
+                        local_path = img_path.replace('/uploads/', self.upload_folder + '/')
+                        if os.path.exists(local_path):
+                            # 使用相对路径或者绝对路径
+                            # 为了兼容，我们使用相对于tex文件的位置
+                            relative_path = local_path.replace('\\', '/')
+                            content += f"\\begin{{center}}\n"
+                            content += f"\\includegraphics[width=0.8\\textwidth]{{{relative_path}}}\n"
+                            content += f"\\end{{center}}\n\n"
+                    else:
+                        # 直接使用提供的路径
+                        content += f"\\begin{{center}}\n"
+                        content += f"\\includegraphics[width=0.8\\textwidth]{{{img_path}}}\n"
+                        content += f"\\end{{center}}\n\n"
             
             # 如果包含答案模式，添加参考解答
             if mode == 'with-answers' and question.get('reference_answer'):
@@ -149,10 +164,19 @@ class ExportRenderer:
             # 处理图片
             images = question.get('image', [])
             for img_path in images:
-                if img_path and os.path.exists(img_path.replace('/uploads/', self.upload_folder + '/')):
+                if img_path:
                     try:
-                        full_path = img_path.replace('/uploads/', self.upload_folder + '/')
-                        doc.add_picture(full_path, width=Inches(4))
+                        # 处理图片路径
+                        if img_path.startswith('/uploads/'):
+                            full_path = img_path.replace('/uploads/', self.upload_folder + '/')
+                        else:
+                            full_path = img_path
+                        
+                        # 检查文件是否存在
+                        if os.path.exists(full_path):
+                            doc.add_picture(full_path, width=Inches(4))
+                        else:
+                            print(f"图片文件不存在: {full_path}")
                     except Exception as e:
                         print(f"无法添加图片 {img_path}: {e}")
             
@@ -179,7 +203,7 @@ class ExportRenderer:
     
     def render_pdf(self, questions: List[Dict], mode: str, title: str) -> str:
         """
-        生成PDF格式试卷（通过LaTeX编译）
+        生成PDF格式试卷（通过LaTeX编译API）
         
         Args:
             questions: 题目列表
@@ -192,47 +216,43 @@ class ExportRenderer:
         # 首先生成LaTeX内容
         latex_content = self.render_latex(questions, mode, title)
         
-        # 保存LaTeX文件
-        tex_filename = f'paper_{uuid.uuid4().hex[:8]}.tex'
-        tex_path = os.path.join(self.upload_folder, tex_filename)
-        
-        with open(tex_path, 'w', encoding='utf-8') as f:
-            f.write(latex_content)
-        
-        # 尝试编译为PDF
+        # 调用LaTeX编译API
         try:
-            import subprocess
-            pdf_filename = tex_filename.replace('.tex', '.pdf')
-            pdf_path = os.path.join(self.upload_folder, pdf_filename)
+            api_url = LATEX_COMPILE_CONFIG["api_url"]
+            compile_recipe = LATEX_COMPILE_CONFIG.get("compile_recipe")
             
-            # 使用xelatex编译（支持中文）
-            result = subprocess.run([
-                'xelatex', 
-                '-output-directory', self.upload_folder,
-                '-interaction=nonstopmode',
-                tex_path
-            ], capture_output=True, text=True, timeout=30)
+            payload = {
+                "latex_content": latex_content
+            }
+            if compile_recipe:
+                payload["compile_recipe"] = compile_recipe
             
-            if result.returncode == 0 and os.path.exists(pdf_path):
-                # 清理临时文件
-                try:
-                    os.remove(tex_path)
-                    # 清理其他LaTeX生成的文件
-                    for ext in ['.aux', '.log', '.out']:
-                        temp_file = tex_path.replace('.tex', ext)
-                        if os.path.exists(temp_file):
-                            os.remove(temp_file)
-                except:
-                    pass
-                
-                return pdf_path
+            response = requests.post(api_url, json=payload, timeout=120)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("success") and result.get("pdf_base64"):
+                    # 解码PDF并保存
+                    pdf_filename = f'paper_{uuid.uuid4().hex[:8]}.pdf'
+                    pdf_path = os.path.join(self.upload_folder, pdf_filename)
+                    
+                    pdf_data = base64.b64decode(result["pdf_base64"])
+                    with open(pdf_path, 'wb') as f:
+                        f.write(pdf_data)
+                    
+                    return pdf_path
+                else:
+                    raise Exception(result.get("error", "Unknown error"))
             else:
-                # 如果编译失败，返回LaTeX文件
-                return tex_path
+                raise Exception(f"API request failed: {response.status_code}")
                 
         except Exception as e:
             print(f"PDF编译失败: {e}")
-            # 如果编译失败，返回LaTeX文件
+            # 如果编译失败，保存LaTeX文件作为备用
+            tex_filename = f'paper_{uuid.uuid4().hex[:8]}.tex'
+            tex_path = os.path.join(self.upload_folder, tex_filename)
+            with open(tex_path, 'w', encoding='utf-8') as f:
+                f.write(latex_content)
             return tex_path
     
     def _clean_latex_content(self, content: str) -> str:

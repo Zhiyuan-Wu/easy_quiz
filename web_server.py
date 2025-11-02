@@ -326,6 +326,32 @@ def uploaded_file(filename):
     """提供上传的图片文件"""
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
+@app.route('/images/<path:path>')
+def serve_image(path):
+    """
+    提供图片文件服务，支持 uploads 目录下的所有图片
+    例如：/uploads/ocr_images/ocr_463c588a_0.jpg
+    """
+    try:
+        # 构建完整文件路径
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], path)
+        
+        # 安全检查：确保路径在 uploads 目录内
+        upload_folder = os.path.abspath(app.config['UPLOAD_FOLDER'])
+        abs_file_path = os.path.abspath(file_path)
+        
+        if not abs_file_path.startswith(upload_folder):
+            return jsonify({'error': 'Invalid path'}), 403
+        
+        # 检查文件是否存在
+        if os.path.exists(abs_file_path) and os.path.isfile(abs_file_path):
+            return send_from_directory(upload_folder, path)
+        else:
+            return jsonify({'error': 'File not found'}), 404
+    except Exception as e:
+        logger.log_error(e, f"图片服务错误 - path: {path}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/questions/<int:question_id>', methods=['DELETE'])
 @login_required
 def delete_question(question_id):

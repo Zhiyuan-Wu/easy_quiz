@@ -54,3 +54,15 @@ EMBEDDING_CONFIG = {
     "api_url": "http://192.168.31.65:11434/api/embed",
     "model": "qwen3-embedding:0.6b"
 }
+
+# Embedding缓存配置
+EMBEDDING_CACHE_PATH = "data/embeddings_cache.jsonl"
+
+# LaTeX编译服务配置
+LATEX_COMPILE_CONFIG = {
+    "api_url": "http://192.168.31.65:5000/compile-latex",
+    "compile_recipe": [
+        ["xelatex", "-output-directory", "{output_dir}", "-interaction=nonstopmode", "{tex_file}"],
+        ["xelatex", "-output-directory", "{output_dir}", "-interaction=nonstopmode", "{tex_file}"]
+    ]
+}

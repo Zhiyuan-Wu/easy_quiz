@@ -1,8 +1,11 @@
 import os
 import uuid
 import hashlib
+import subprocess
+import tempfile
+import shutil
 from pathlib import Path
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from transformers import AutoModel, AutoTokenizer
 import torch
 import base64
@@ -174,6 +177,101 @@ def ocr_endpoint():
         shutil.rmtree(request_dir, ignore_errors=True)
         print(f"Error: {e}")
         return jsonify({"error": str(e)}), 500
+
+# LaTeX编译为PDF接口
+@app.route('/compile-latex', methods=['POST'])
+def compile_latex():
+    """
+    将LaTeX内容编译为PDF文件
+    
+    请求体:
+    {
+        "latex_content": "LaTeX内容",
+        "compile_recipe": [  # 可选，如果不提供则使用默认配置
+            ["xelatex", "-output-directory", "{output_dir}", "-interaction=nonstopmode", "{tex_file}"],
+            ["xelatex", "-output-directory", "{output_dir}", "-interaction=nonstopmode", "{tex_file}"]
+        ]
+    }
+    
+    返回:
+    {
+        "success": true,
+        "pdf_base64": "base64编码的PDF文件内容"
+    }
+    """
+    if not request.is_json:
+        return jsonify({"error": "Request must be JSON"}), 400
+    
+    data = request.get_json()
+    latex_content = data.get('latex_content', '')
+    
+    if not latex_content:
+        return jsonify({"error": "latex_content is required"}), 400
+    
+    # 获取编译命令序列（如果提供）
+    compile_recipe = data.get('compile_recipe', None)
+    if not compile_recipe:
+        # 使用默认的编译命令序列
+        compile_recipe = [
+            ["xelatex", "-output-directory", "{output_dir}", "-interaction=nonstopmode", "{tex_file}"],
+            ["xelatex", "-output-directory", "{output_dir}", "-interaction=nonstopmode", "{tex_file}"]
+        ]
+    
+    # 创建临时目录
+    temp_dir = Path(tempfile.mkdtemp())
+    tex_file = temp_dir / "paper.tex"
+    pdf_file = temp_dir / "paper.pdf"
+    
+    try:
+        # 保存LaTeX内容
+        with open(tex_file, 'w', encoding='utf-8') as f:
+            f.write(latex_content)
+        
+        # 执行编译命令序列
+        for cmd_template in compile_recipe:
+            cmd = []
+            for arg in cmd_template:
+                cmd.append(arg.replace('{output_dir}', str(temp_dir)).replace('{tex_file}', str(tex_file)))
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=str(temp_dir)
+            )
+            
+            if result.returncode != 0:
+                print(f"Compilation warning: {result.stderr}")
+                # 继续执行，某些警告不影响最终结果
+        
+        # 检查PDF是否生成
+        if not pdf_file.exists():
+            return jsonify({
+                "error": "PDF compilation failed",
+                "details": "PDF file was not generated"
+            }), 500
+        
+        # 读取PDF文件并转换为base64
+        with open(pdf_file, 'rb') as f:
+            pdf_data = f.read()
+            pdf_base64 = base64.b64encode(pdf_data).decode('utf-8')
+        
+        return jsonify({
+            "success": True,
+            "pdf_base64": pdf_base64
+        })
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Compilation timeout"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        # 清理临时目录
+        try:
+            shutil.rmtree(temp_dir)
+        except:
+            pass
 
 
 if __name__ == '__main__':

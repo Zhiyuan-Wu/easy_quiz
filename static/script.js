@@ -464,9 +464,13 @@ async function handleSearch() {
     const keyword = searchKeyword.value.trim();
     const selectedTags = getSelectedTags(tagFilter);
     
+    // 显示搜索按钮的旋转图标
+    const searchIcon = searchBtn.querySelector('i');
+    const originalClass = searchIcon.className;
+    searchIcon.className = 'fas fa-spinner fa-spin';
+    searchBtn.disabled = true;
+    
     try {
-        showLoading(true);
-        
         let url = '/api/questions/search?';
         const params = new URLSearchParams();
         
@@ -494,7 +498,8 @@ async function handleSearch() {
     } catch (error) {
         showMessage('搜索失败: ' + error.message, 'error');
     } finally {
-        showLoading(false);
+        searchIcon.className = originalClass;
+        searchBtn.disabled = false;
     }
 }
 
@@ -622,10 +627,27 @@ async function viewQuestion(questionId) {
         if (result.success) {
             const question = result.question;
             
-            document.getElementById('modal-question-content').innerHTML = `
+            // 构建题目内容HTML，包含图片
+            let contentHtml = `
                 <h4>题目内容</h4>
                 <div class="question-detail">${renderMathContent(question.latex_content)}</div>
             `;
+            
+            // 添加图片显示
+            if (question.image && question.image.length > 0) {
+                const imageScale = APP_CONFIG.imageDisplay.defaultScale;
+                const imagesHtml = question.image.map(img => {
+                    // 处理图片路径：如果是以/uploads/开头，转换为/images/路径
+                    let imageSrc = img;
+                    if (imageSrc.startsWith('/uploads/')) {
+                        imageSrc = imageSrc.replace('/uploads/', '/images/');
+                    }
+                    return `<img src="${imageSrc}" alt="题目图片" style="max-width: ${imageScale * 100}%; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px;">`;
+                }).join('');
+                contentHtml += `<div class="question-images" style="margin-top: 15px;">${imagesHtml}</div>`;
+            }
+            
+            document.getElementById('modal-question-content').innerHTML = contentHtml;
             
             document.getElementById('modal-question-tags').innerHTML = `
                 <h4>标签</h4>
@@ -859,13 +881,14 @@ async function handleParseExam() {
     parseBtn.classList.add('parsing');
     
     let progress = 0;
+    const config = APP_CONFIG.parsingProgress;
     const progressInterval = setInterval(() => {
-        progress += 2; // 每次增加2%
-        if (progress > 99) {
-            progress = 99;
+        progress += config.increment;
+        if (progress > config.maxProgress) {
+            progress = config.maxProgress;
         }
         parseBtn.innerHTML = `<i class="fas fa-cog fa-spin"></i> 正在解析 ${progress}%`;
-    }, 200); // 每200ms更新一次，大约需要10秒到99%
+    }, config.interval);
     
     try {
         console.log('开始解析试卷...');
@@ -944,7 +967,14 @@ function renderParsedQuestions() {
                 </div>
                 ${questionImages.length > 0 ? `
                     <div class="question-images">
-                        ${questionImages.map(img => `<img src="${img}" style="max-width: 200px; margin: 5px;">`).join('')}
+                        ${questionImages.map(img => {
+                            let imageSrc = img;
+                            if (imageSrc.startsWith('/uploads/')) {
+                                imageSrc = imageSrc.replace('/uploads/', '/images/');
+                            }
+                            const imageScale = APP_CONFIG.imageDisplay.defaultScale;
+                            return `<img src="${imageSrc}" style="max-width: ${imageScale * 100}%; margin: 5px;">`;
+                        }).join('')}
                     </div>
                 ` : ''}
                 ${questionTags.length > 0 ? `

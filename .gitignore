@@ -5,3 +5,5 @@ uploads
 *.png
 log.txt
 cookies.txt
+embeddings_cache.jsonl
+data/
