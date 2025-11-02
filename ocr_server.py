@@ -1,5 +1,6 @@
 import os
 import uuid
+import hashlib
 from pathlib import Path
 from flask import Flask, request, jsonify
 from transformers import AutoModel, AutoTokenizer
@@ -74,12 +75,47 @@ def ocr_endpoint():
     if not file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
         return jsonify({"error": "Only PNG/JPG images are allowed"}), 400
 
-    # 创建唯一请求目录
-    request_id = str(uuid.uuid4())
+    # 读取文件内容并计算hash
+    file_content = file.read()
+    file.seek(0)  # 重置文件指针以便后续保存
+    
+    # 计算图像的hash作为请求ID
+    image_hash = hashlib.sha256(file_content).hexdigest()[:32]
+    request_id = image_hash
     request_dir = RESULT_BASE / request_id
+    
+    # 检查是否已存在结果
+    mmd_file = request_dir / "result.mmd"
+    if mmd_file.exists():
+        # 如果结果文件存在，直接返回缓存的结果
+        with open(mmd_file, 'r', encoding='utf-8') as f:
+            markdown_content = f.read()
+        
+        # 读取缓存的图片文件
+        images_dir = request_dir / "images"
+        image_data = []
+        if images_dir.exists():
+            for img_file in sorted(images_dir.glob("*.jpg")):
+                with open(img_file, 'rb') as f:
+                    image_data.append({
+                        "filename": "images/" + img_file.name,
+                        "data": base64.b64encode(f.read()).decode('utf-8')
+                    })
+            for img_file in sorted(images_dir.glob("*.png")):
+                with open(img_file, 'rb') as f:
+                    image_data.append({
+                        "filename": "images/" + img_file.name,
+                        "data": base64.b64encode(f.read()).decode('utf-8')
+                    })
+        
+        return jsonify({
+            "request_id": request_id,
+            "markdown": markdown_content,
+            "images": image_data
+        })
+    
+    # 如果不存在，创建目录并保存图片
     request_dir.mkdir(parents=True, exist_ok=True)
-
-    # 保存上传的图片
     input_image_path = request_dir / "input.png"
     file.save(input_image_path)
 

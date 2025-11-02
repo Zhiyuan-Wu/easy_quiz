@@ -48,3 +48,9 @@ MAX_ANSWER_LENGTH = 5000     # 答案最大长度
 
 # OCR服务配置
 OCR_BASE_URL = "http://192.168.31.65:5000"
+
+# Embedding服务配置
+EMBEDDING_CONFIG = {
+    "api_url": "http://192.168.31.65:11434/api/embed",
+    "model": "qwen3-embedding:0.6b"
+}

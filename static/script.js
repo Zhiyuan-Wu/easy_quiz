@@ -77,11 +77,10 @@ async function initializeApp() {
     const activeTab = document.querySelector('.nav-tab.active');
     if (activeTab) {
         const tabName = activeTab.dataset.tab;
-        if (tabName === 'search') {
-            await loadAllQuestions();
-        } else if (tabName === 'manage') {
+        if (tabName === 'manage') {
             await loadQuestions();
         }
+        // 不再自动加载搜索页面的题目
     }
     
     // 初始化MathJax
@@ -166,13 +165,21 @@ function setupEventListeners() {
     imageUpload.addEventListener('change', handleImageUpload);
     
     // 试卷上传
-    examUploadBtn.addEventListener('click', () => examUpload.click());
+    examUploadBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // 阻止事件冒泡，避免触发uploadZone的点击事件
+        examUpload.click();
+    });
     examUpload.addEventListener('change', handleExamUpload);
     parseExamBtn.addEventListener('click', handleParseExam);
     
     // 拖拽上传
     const uploadZone = document.getElementById('upload-zone');
-    uploadZone.addEventListener('click', () => examUpload.click());
+    uploadZone.addEventListener('click', (e) => {
+        // 如果点击的是按钮或其他子元素，不触发文件选择
+        if (e.target === uploadZone || e.target.closest('.upload-icon') || e.target.tagName === 'H3' || e.target.tagName === 'P') {
+            examUpload.click();
+        }
+    });
     uploadZone.addEventListener('dragover', (e) => {
         e.preventDefault();
         uploadZone.classList.add('dragover');
@@ -240,10 +247,13 @@ function switchTab(tabName) {
     if (tabName === 'manage') {
         loadQuestions();
     } else if (tabName === 'search') {
-        loadAllQuestions();
+        // 不再自动加载题目，只在用户触发搜索时显示结果
         if (availableTags.length > 0) {
             renderTagFilter();
         }
+        // 隐藏搜索结果区域
+        searchResults.innerHTML = '';
+        searchResults.style.display = 'none';
     }
 }
 
@@ -490,6 +500,9 @@ async function handleSearch() {
 
 // 渲染搜索结果（与题目预览保持一致的样式）
 function renderSearchResults() {
+    // 显示搜索结果区域
+    searchResults.style.display = 'block';
+    
     if (currentQuestions.length === 0) {
         searchResults.innerHTML = '<div class="no-results">没有找到相关题目</div>';
         return;
@@ -839,8 +852,22 @@ async function handleParseExam() {
     const formData = new FormData();
     formData.append('file', file);
     
+    // 替换按钮为进度按钮
+    const parseBtn = parseExamBtn;
+    const originalBtnText = parseBtn.innerHTML;
+    parseBtn.disabled = true;
+    parseBtn.classList.add('parsing');
+    
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+        progress += 2; // 每次增加2%
+        if (progress > 99) {
+            progress = 99;
+        }
+        parseBtn.innerHTML = `<i class="fas fa-cog fa-spin"></i> 正在解析 ${progress}%`;
+    }, 200); // 每200ms更新一次，大约需要10秒到99%
+    
     try {
-        showLoading(true);
         console.log('开始解析试卷...');
         
         const response = await fetch('/api/ocr-parse', {
@@ -850,6 +877,12 @@ async function handleParseExam() {
         
         const result = await response.json();
         console.log('解析结果:', result);
+        
+        // 停止进度条
+        clearInterval(progressInterval);
+        parseBtn.innerHTML = `<i class="fas fa-cogs"></i> 开始解析`;
+        parseBtn.disabled = false;
+        parseBtn.classList.remove('parsing');
         
         if (result.success) {
             parsedQuestions = result.questions || [];
@@ -878,9 +911,11 @@ async function handleParseExam() {
         }
     } catch (error) {
         console.error('解析过程中发生错误:', error);
+        clearInterval(progressInterval);
+        parseBtn.innerHTML = originalBtnText;
+        parseBtn.disabled = false;
+        parseBtn.classList.remove('parsing');
         showMessage('试卷解析失败: ' + error.message, 'error');
-    } finally {
-        showLoading(false);
     }
 }
 
@@ -953,6 +988,7 @@ async function handleBatchSave() {
     }
     
     const visibility = document.querySelector('input[name="ocr-visibility"]:checked').value;
+    const source = document.getElementById('ocr-source').value.trim() || '试卷解析';
     
     try {
         showLoading(true);
@@ -969,7 +1005,7 @@ async function handleBatchSave() {
                     latex_content: question.question,
                     tags: question.tags || [],
                     reference_answer: question.answer || '',
-                    source: '试卷解析',
+                    source: source,
                     image: question.image || [],
                     visibility: visibility
                 })

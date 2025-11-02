@@ -8,11 +8,15 @@ import json
 import requests
 import re
 import time
+import os
+import threading
+import numpy as np
 from typing import List, Dict, Optional, Tuple
 from config import DATABASE_PATH, LLM_CONFIG, MAX_QUESTION_LENGTH, MAX_ANSWER_LENGTH
 from openai import OpenAI
 from logger import get_logger
 from json_repair import repair_json
+from ocr_client import DeepSeekOCRClient
 
 class QuestionManager:
     """高考题目管理器类"""
@@ -29,7 +33,16 @@ class QuestionManager:
         self.system_manager = system_manager
         self.llm_client = OpenAI(api_key=LLM_CONFIG["api_key"],base_url=LLM_CONFIG["api_url"])
         self.logger = get_logger()
+        self.ocr_client = DeepSeekOCRClient()
         self.init_database()
+        
+        # Embedding缓存文件路径
+        self.embedding_cache_path = "embeddings_cache.jsonl"
+        self.embedding_cache = {}  # question_id -> embedding vector
+        self._load_embedding_cache()
+        
+        # 异步任务锁
+        self._async_task_lock = threading.Lock()
     
     def init_database(self):
         """初始化数据库表结构"""
@@ -70,6 +83,103 @@ class QuestionManager:
         
         conn.commit()
         conn.close()
+    
+    def _load_embedding_cache(self):
+        """加载embedding缓存"""
+        if os.path.exists(self.embedding_cache_path):
+            try:
+                with open(self.embedding_cache_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip():
+                            item = json.loads(line.strip())
+                            self.embedding_cache[item['question_id']] = item['embedding']
+            except Exception as e:
+                self.logger.log_error(e, "加载embedding缓存失败")
+                self.embedding_cache = {}
+    
+    def _save_embedding_to_cache(self, question_id: int, embedding: List[float]):
+        """追加保存embedding到缓存文件"""
+        try:
+            with open(self.embedding_cache_path, 'a', encoding='utf-8') as f:
+                item = {
+                    'question_id': question_id,
+                    'embedding': embedding
+                }
+                f.write(json.dumps(item, ensure_ascii=False) + '\n')
+                # 同时更新内存缓存
+                self.embedding_cache[question_id] = embedding
+        except Exception as e:
+            self.logger.log_error(e, f"保存embedding缓存失败 - question_id: {question_id}")
+    
+    def _get_detailed_instruct(self, task_description: str, query: str) -> str:
+        """获取带指令的查询文本"""
+        return f'Instruct: {task_description}\nQuery:{query}'
+    
+    def _get_question_text(self, question: Dict) -> str:
+        """获取题目的完整文本（来源+标签+题目+解答）"""
+        parts = []
+        if question.get('source'):
+            parts.append(question['source'])
+        if question.get('tags'):
+            parts.extend(question['tags'])
+        if question.get('latex_content'):
+            parts.append(question['latex_content'])
+        if question.get('reference_answer'):
+            parts.append(question['reference_answer'])
+        return ' '.join(parts)
+    
+    def _compute_cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """计算余弦相似度"""
+        vec1 = np.array(vec1)
+        vec2 = np.array(vec2)
+        dot_product = np.dot(vec1, vec2)
+        norm1 = np.linalg.norm(vec1)
+        norm2 = np.linalg.norm(vec2)
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+        return float(dot_product / (norm1 * norm2))
+    
+    def _compute_missing_embeddings_async(self, question_ids: List[int], current_user_id: int = None):
+        """异步计算缺失的embedding"""
+        def compute_task():
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                for question_id in question_ids:
+                    # 检查是否已有embedding
+                    if question_id in self.embedding_cache:
+                        continue
+                    
+                    # 获取题目信息
+                    cursor.execute('''
+                        SELECT * FROM questions 
+                        WHERE id = ? AND (visibility = 'public' OR user_id = ?)
+                    ''', (question_id, current_user_id))
+                    
+                    row = cursor.fetchone()
+                    if not row:
+                        continue
+                    
+                    question = self._row_to_dict(row)
+                    question_text = self._get_question_text(question)
+                    
+                    # 计算embedding（不需要prompt）
+                    try:
+                        embeddings = self.ocr_client.get_embeddings([question_text])
+                        if embeddings and len(embeddings) > 0:
+                            self._save_embedding_to_cache(question_id, embeddings[0])
+                    except Exception as e:
+                        self.logger.log_error(e, f"计算embedding失败 - question_id: {question_id}")
+                
+                conn.close()
+            except Exception as e:
+                self.logger.log_error(e, "异步计算embedding任务失败")
+        
+        # 在后台线程中执行
+        thread = threading.Thread(target=compute_task)
+        thread.daemon = True
+        thread.start()
     
     def add_question(self, latex_content: str, tags: List[str] = None, 
                     reference_answer: str = None, source: str = None, 
@@ -318,9 +428,9 @@ class QuestionManager:
 
 请按以下要求处理：
 1. 去除OCR识别中的明显噪声和不合理内容
-2. 识别并分离每道题目
-3. 将题目内容转换为LaTeX格式，选择题选项优先使用enumerate环境
-4. 识别题目中引用的图片（如果有），从可用图片列表中选择合适的图片
+2. 识别并分离每道题目。移除原有题目编号，分值信息。
+3. 将题目内容转换为LaTeX格式，选择题选项优先使用enumerate环境。
+4. 识别题目中引用的图片（如果有），从可用图片列表中选择合适的图片，严格返回可用的图片文件列表中的文件名，不要新增前缀或移除后缀。
 5. 为每道题目生成其所考察的知识点标签并生成解答，标签可以参考：{', '.join(available_tags) if available_tags else '立体几何, 导数题, 极值点偏移, 三角函数, 数列, 概率统计, 解析几何, 函数与方程, 不等式, 向量, 复数, 算法与程序框图'}
 6. 返回JSON格式，包含题目列表
 
@@ -374,6 +484,7 @@ class QuestionManager:
                     mapped_images = []
                     if question_images and image_filename_mapping:
                         for img_filename in question_images:
+                            img_filename = img_filename.strip().replace("images/", "")
                             if img_filename in image_filename_mapping:
                                 mapped_images.append(image_filename_mapping[img_filename])
                                 self.logger.log_image_processing(img_filename, image_filename_mapping[img_filename], "映射")
@@ -464,36 +575,121 @@ class QuestionManager:
         
         return questions
     
-    def search_questions(self, keyword: str, current_user_id: int = None) -> List[Dict]:
+    def search_questions(self, keyword: str, current_user_id: int = None, k: int = 10) -> List[Dict]:
         """
-        根据关键词搜索题目（考虑可见性）
+        根据关键词搜索题目（考虑可见性），结合关键词搜索和embedding召回
         
         Args:
             keyword: 搜索关键词
             current_user_id: 当前用户ID
+            k: embedding搜索返回的最相似题目数量
             
         Returns:
-            匹配的题目列表
+            匹配的题目列表（合并了关键词搜索和embedding搜索的结果）
         """
+        # 1. 关键词搜索
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        keyword_questions = []
+        if keyword:
+            cursor.execute('''
+                SELECT * FROM questions 
+                WHERE (latex_content LIKE ? OR source LIKE ?)
+                AND (visibility = 'public' OR user_id = ?)
+                ORDER BY created_at DESC
+            ''', (f'%{keyword}%', f'%{keyword}%', current_user_id))
+            
+            rows = cursor.fetchall()
+            for row in rows:
+                question = self._row_to_dict(row)
+                keyword_questions.append(question)
+        
+        # 2. 获取所有可见题目
         cursor.execute('''
             SELECT * FROM questions 
-            WHERE (latex_content LIKE ? OR source LIKE ?)
-            AND (visibility = 'public' OR user_id = ?)
-            ORDER BY created_at DESC
-        ''', (f'%{keyword}%', f'%{keyword}%', current_user_id))
+            WHERE visibility = 'public' OR user_id = ?
+        ''', (current_user_id,))
         
+        all_visible_questions = []
+        all_question_ids = []
         rows = cursor.fetchall()
-        conn.close()
-        
-        questions = []
         for row in rows:
             question = self._row_to_dict(row)
-            questions.append(question)
+            all_visible_questions.append(question)
+            all_question_ids.append(question['id'])
         
-        return questions
+        conn.close()
+        
+        # 3. Embedding搜索（如果有关键词）
+        embedding_questions = []
+        missing_embedding_ids = []
+        
+        if keyword:
+            try:
+                # 构建带指令的查询文本
+                task = 'Given a web search query, retrieve relevant passages that answer the query'
+                query_text = self._get_detailed_instruct(task, keyword)
+                
+                # 获取查询的embedding
+                query_embeddings = self.ocr_client.get_embeddings([query_text])
+                if query_embeddings and len(query_embeddings) > 0:
+                    query_embedding = query_embeddings[0]
+                    
+                    # 计算相似度
+                    similarities = []
+                    for question in all_visible_questions:
+                        question_id = question['id']
+                        
+                        # 检查是否有缓存
+                        if question_id in self.embedding_cache:
+                            question_embedding = self.embedding_cache[question_id]
+                            similarity = self._compute_cosine_similarity(query_embedding, question_embedding)
+                            similarities.append((similarity, question))
+                        else:
+                            missing_embedding_ids.append(question_id)
+                    
+                    # 按相似度排序，取top k
+                    similarities.sort(key=lambda x: x[0], reverse=True)
+                    embedding_questions = [q for _, q in similarities[:k]]
+            except Exception as e:
+                self.logger.log_error(e, "Embedding搜索失败")
+        
+        # 4. 合并结果（去重）
+        result_dict = {}
+        for question in keyword_questions:
+            result_dict[question['id']] = question
+        
+        for question in embedding_questions:
+            if question['id'] not in result_dict:
+                result_dict[question['id']] = question
+        
+        # 5. 如果有缺失的embedding，启动异步任务计算
+        if missing_embedding_ids:
+            # 只计算可见题目的embedding
+            visible_missing_ids = [qid for qid in missing_embedding_ids if qid in all_question_ids]
+            if visible_missing_ids:
+                self._compute_missing_embeddings_async(visible_missing_ids, current_user_id)
+        
+        # 6. 返回合并后的结果列表
+        results = list(result_dict.values())
+        
+        # 优先显示关键词匹配的题目，然后是embedding匹配的
+        def sort_key(q):
+            in_keyword = q['id'] in [q2['id'] for q2 in keyword_questions]
+            in_embedding = q['id'] in [q2['id'] for q2 in embedding_questions]
+            if in_keyword and in_embedding:
+                return 0  # 两种都匹配，优先级最高
+            elif in_keyword:
+                return 1  # 只关键词匹配
+            elif in_embedding:
+                return 2  # 只embedding匹配
+            else:
+                return 3
+        
+        results.sort(key=sort_key)
+        
+        return results
     
     def get_question_stats(self, current_user_id: int = None) -> Dict:
         """

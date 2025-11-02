@@ -1,5 +1,6 @@
 import requests
 from pathlib import Path
+from config import EMBEDDING_CONFIG
 
 class DeepSeekOCRClient:
     def __init__(self, base_url: str = "http://localhost:5000"):
@@ -38,6 +39,33 @@ class DeepSeekOCRClient:
         
         # OCR服务器已经返回base64编码的图片数据，直接返回
         return result
+    
+    def get_embeddings(self, texts: list) -> list:
+        """
+        获取文本的embedding向量
+        
+        :param texts: 文本列表，例如 ["First sentence", "Second sentence"]
+        :return: embedding向量列表，每个向量是一个浮点数列表
+        :raises: requests.HTTPError
+        """
+        url = EMBEDDING_CONFIG["api_url"]
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "model": EMBEDDING_CONFIG["model"],
+            "input": texts
+        }
+        
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        
+        result = response.json()
+        if "embeddings" in result:
+            return result["embeddings"]
+        else:
+            raise ValueError("Invalid response format from embedding API")
 
 
 # ----------------------------
