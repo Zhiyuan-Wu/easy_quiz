@@ -259,6 +259,7 @@ def compile_latex():
             
             result = subprocess.run(
                 cmd,
+                shell=True,
                 capture_output=True,
                 text=True,
                 timeout=60,

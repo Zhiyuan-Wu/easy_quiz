@@ -8,3 +8,4 @@ cookies.txt
 embeddings_cache.jsonl
 data/
 results/
+latex_results/
