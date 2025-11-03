@@ -37,7 +37,7 @@ class ExportRenderer:
         """
         self.upload_folder = upload_folder
     
-    def render_latex(self, questions: List[Dict], mode: str, title: str) -> str:
+    def render_latex(self, questions: List[Dict], mode: str, title: str, return_metadata: bool = False):
         """
         生成LaTeX格式试卷
         
@@ -45,9 +45,16 @@ class ExportRenderer:
             questions: 题目列表
             mode: 导出模式 (questions/with-answers)
             title: 试卷标题
+            return_metadata: 是否返回元数据（输出目录、依赖文件等）
             
         Returns:
-            LaTeX内容字符串
+            LaTeX内容字符串，或者如果return_metadata=True，返回(latex_content, metadata)元组
+            metadata包含: {
+                'output_dir': 输出目录路径,
+                'cls_file': cls文件路径,
+                'tex_file': tex文件路径,
+                'image_files': 图片文件列表（文件名到完整路径的映射）
+            }
         """
         if not os.path.exists(LATEX_TEMPLATE_PATH):
             raise FileNotFoundError(f"未找到LaTeX模板文件: {LATEX_TEMPLATE_PATH}")
@@ -97,6 +104,22 @@ class ExportRenderer:
         with open(output_tex_path, 'w', encoding='utf-8') as f:
             f.write(latex_content)
 
+        if return_metadata:
+            # 构建图片文件映射（文件名 -> 完整路径）
+            image_files = {}
+            for orig_path, filename in copied_images.items():
+                image_full_path = os.path.join(output_dir, filename)
+                if os.path.exists(image_full_path):
+                    image_files[filename] = image_full_path
+            
+            metadata = {
+                'output_dir': output_dir,
+                'cls_file': class_target,
+                'tex_file': output_tex_path,
+                'image_files': image_files
+            }
+            return latex_content, metadata
+        
         return latex_content
     
     def render_docx(self, questions: List[Dict], mode: str, title: str) -> str:
@@ -197,47 +220,52 @@ class ExportRenderer:
         Returns:
             文件路径
         """
-        # 首先生成LaTeX内容
-        latex_content = self.render_latex(questions, mode, title)
+        # 首先生成LaTeX内容和元数据
+        latex_content, metadata = self.render_latex(questions, mode, title, return_metadata=True)
         
         # 调用LaTeX编译API
-        try:
-            api_url = LATEX_COMPILE_CONFIG["api_url"]
-            compile_recipe = LATEX_COMPILE_CONFIG.get("compile_recipe")
-            
-            payload = {
-                "latex_content": latex_content
-            }
-            if compile_recipe:
-                payload["compile_recipe"] = compile_recipe
-            
-            response = requests.post(api_url, json=payload, timeout=120)
-            
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("success") and result.get("pdf_base64"):
-                    # 解码PDF并保存
-                    pdf_filename = f'paper_{uuid.uuid4().hex[:8]}.pdf'
-                    pdf_path = os.path.join(self.upload_folder, pdf_filename)
-                    
-                    pdf_data = base64.b64decode(result["pdf_base64"])
-                    with open(pdf_path, 'wb') as f:
-                        f.write(pdf_data)
-                    
-                    return pdf_path
-                else:
-                    raise Exception(result.get("error", "Unknown error"))
-            else:
-                raise Exception(f"API request failed: {response.status_code}")
+        api_url = LATEX_COMPILE_CONFIG["api_url"]
+        compile_recipe = LATEX_COMPILE_CONFIG.get("compile_recipe")
+        
+        # 读取图像文件内容并转换为base64编码
+        image_data = {}
+        for filename, image_path in metadata['image_files'].items():
+            if os.path.exists(image_path):
+                with open(image_path, 'rb') as f:
+                    image_bytes = f.read()
+                    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                    image_data[filename] = image_base64
+        
+        # 构建依赖文件信息（只传递图像数据，不传递路径）
+        dependencies = {
+            'image_files': image_data  # 文件名 -> base64编码的数据
+        }
+        
+        payload = {
+            "latex_content": latex_content,
+            "dependencies": dependencies
+        }
+        if compile_recipe:
+            payload["compile_recipe"] = compile_recipe
+        
+        response = requests.post(api_url, json=payload, timeout=120)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("success") and result.get("pdf_base64"):
+                # 解码PDF并保存
+                pdf_filename = f'paper_{uuid.uuid4().hex[:8]}.pdf'
+                pdf_path = os.path.join(self.upload_folder, pdf_filename)
                 
-        except Exception as e:
-            print(f"PDF编译失败: {e}")
-            # 如果编译失败，保存LaTeX文件作为备用
-            tex_filename = f'paper_{uuid.uuid4().hex[:8]}.tex'
-            tex_path = os.path.join(self.upload_folder, tex_filename)
-            with open(tex_path, 'w', encoding='utf-8') as f:
-                f.write(latex_content)
-            return tex_path
+                pdf_data = base64.b64decode(result["pdf_base64"])
+                with open(pdf_path, 'wb') as f:
+                    f.write(pdf_data)
+                
+                return pdf_path
+            else:
+                raise Exception(result.get("error", "Unknown error"))
+        else:
+            raise Exception(f"API request failed: {response.status_code}")
 
     def _build_question_block(self, question: Dict, index: int, mode: str, output_dir: str,
                               copied_images: Dict[str, str]) -> str:
