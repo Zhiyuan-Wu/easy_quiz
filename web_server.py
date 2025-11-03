@@ -181,6 +181,47 @@ def add_question():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
+
+@app.route('/api/questions/<int:question_id>', methods=['PUT'])
+@login_required
+def update_question(question_id):
+    """更新题目API"""
+    try:
+        data = request.get_json() or {}
+        latex_content = (data.get('latex_content') or '').strip()
+        reference_answer = data.get('reference_answer', '')
+
+        if not latex_content:
+            return jsonify({'success': False, 'message': '题目内容不能为空'}), 400
+
+        current_user_id = session['user_id']
+        question = question_manager.get_question_by_id(question_id, current_user_id)
+        if not question:
+            return jsonify({'success': False, 'message': '题目不存在或无权访问'}), 404
+
+        if question.get('user_id') != current_user_id:
+            return jsonify({'success': False, 'message': '无权修改该题目'}), 403
+
+        updated_question = question_manager.update_question(
+            question_id=question_id,
+            latex_content=latex_content,
+            reference_answer=reference_answer,
+            current_user_id=current_user_id
+        )
+
+        return jsonify({
+            'success': True,
+            'question': updated_question
+        })
+
+    except PermissionError as e:
+        return jsonify({'success': False, 'message': str(e)}), 403
+    except ValueError as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
+    except Exception as e:
+        logger.log_error(e, f"更新题目失败 - question_id: {question_id}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @app.route('/api/questions/auto-tag', methods=['POST'])
 @login_required
 def auto_tag_question():
@@ -272,6 +313,43 @@ def get_question(question_id):
             }), 404
             
     except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/questions/<int:question_id>/ai-variant', methods=['POST'])
+@login_required
+def generate_question_variant(question_id):
+    """AI生成题目变体API"""
+    try:
+        current_user_id = session['user_id']
+        base_question = question_manager.get_question_by_id(question_id, current_user_id)
+
+        if not base_question:
+            return jsonify({'success': False, 'message': '题目不存在或无权访问'}), 404
+
+        if base_question.get('user_id') != current_user_id:
+            return jsonify({'success': False, 'message': '无权对此题目生成变体'}), 403
+
+        data = request.get_json() or {}
+        working_question = dict(base_question)
+        override_content = data.get('latex_content')
+        override_answer = data.get('reference_answer')
+
+        if override_content:
+            working_question['latex_content'] = override_content
+        if override_answer is not None:
+            working_question['reference_answer'] = override_answer
+
+        variant = question_manager.generate_question_variant(working_question)
+
+        return jsonify({
+            'success': True,
+            'variant': variant
+        })
+    except ValueError as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
+    except Exception as e:
+        logger.log_error(e, f"AI变题失败 - question_id: {question_id}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 

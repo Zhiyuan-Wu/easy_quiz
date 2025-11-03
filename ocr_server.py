@@ -10,6 +10,13 @@ from transformers import AutoModel, AutoTokenizer
 import torch
 import base64
 
+# 尝试从config导入cls文件路径，如果不存在则使用默认值
+try:
+    from config import LATEX_CLASS_PATH
+except ImportError:
+    # 如果config不存在，使用相对路径
+    LATEX_CLASS_PATH = "resources/exam-zh.cls"
+
 # ----------------------------
 # 配置
 # ----------------------------
@@ -168,6 +175,9 @@ def compile_latex():
     请求体:
     {
         "latex_content": "LaTeX内容",
+        "dependencies": {  # 可选，依赖文件信息
+            "image_files": {"filename": "base64编码的图像数据"}  # 图片文件名到base64数据的映射
+        },
         "compile_recipe": [  # 可选，如果不提供则使用默认配置
             ["xelatex", "-output-directory", "{output_dir}", "-interaction=nonstopmode", "{tex_file}"],
             ["xelatex", "-output-directory", "{output_dir}", "-interaction=nonstopmode", "{tex_file}"]
@@ -189,6 +199,10 @@ def compile_latex():
     if not latex_content:
         return jsonify({"error": "latex_content is required"}), 400
     
+    # 获取依赖文件信息
+    dependencies = data.get('dependencies', {})
+    image_files_data = dependencies.get('image_files', {})  # 文件名 -> base64数据
+    
     # 获取编译命令序列（如果提供）
     compile_recipe = data.get('compile_recipe', None)
     if not compile_recipe:
@@ -208,23 +222,60 @@ def compile_latex():
         with open(tex_file, 'w', encoding='utf-8') as f:
             f.write(latex_content)
         
-        # 执行编译命令序列
+        # 从本地config读取cls文件路径并拷贝到临时目录
+        if LATEX_CLASS_PATH and os.path.exists(LATEX_CLASS_PATH):
+            cls_filename = os.path.basename(LATEX_CLASS_PATH)
+            cls_target = temp_dir / cls_filename
+            shutil.copy2(LATEX_CLASS_PATH, cls_target)
+            print(f"Copied cls file: {LATEX_CLASS_PATH} -> {cls_target}")
+        else:
+            return jsonify({
+                "error": "cls file not found",
+                "details": f"cls file path: {LATEX_CLASS_PATH}"
+            }), 500
+        
+        # 解码并保存图片文件到临时目录
+        for filename, image_base64 in image_files_data.items():
+            try:
+                image_data = base64.b64decode(image_base64)
+                image_target = temp_dir / filename
+                with open(image_target, 'wb') as f:
+                    f.write(image_data)
+                print(f"Saved image file: {filename} ({len(image_data)} bytes)")
+            except Exception as e:
+                print(f"Warning: failed to decode/save image {filename}: {e}")
+        
+        # 执行编译命令序列（在临时目录中执行，确保能找到依赖文件）
+        # 使用相对路径，因为工作目录已经是temp_dir
+        tex_filename = tex_file.name  # "paper.tex"
         for cmd_template in compile_recipe:
             cmd = []
             for arg in cmd_template:
-                cmd.append(arg.replace('{output_dir}', str(temp_dir)).replace('{tex_file}', str(tex_file)))
+                # 替换output_dir和tex_file占位符
+                replaced_arg = arg.replace('{output_dir}', str(temp_dir))
+                replaced_arg = replaced_arg.replace('{tex_file}', tex_filename)
+                cmd.append(replaced_arg)
+            print(f"Executing command: {' '.join(cmd)}")
             
             result = subprocess.run(
                 cmd,
+                shell=False,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',  # 替换无法解码的字符，避免UnicodeDecodeError
                 timeout=60,
-                cwd=str(temp_dir)
+                cwd=str(temp_dir)  # 在临时目录中执行命令
             )
             
             if result.returncode != 0:
-                print(f"Compilation warning: {result.stderr}")
-                # 继续执行，某些警告不影响最终结果
+                error_msg = result.stderr or result.stdout
+                print(f"Compilation error (returncode={result.returncode}): {error_msg}")
+                # 不再继续执行，编译错误应该被报告
+                return jsonify({
+                    "error": "PDF compilation failed",
+                    "details": error_msg
+                }), 500
         
         # 检查PDF是否生成
         if not pdf_file.exists():

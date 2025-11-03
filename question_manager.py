@@ -119,6 +119,23 @@ class QuestionManager:
             self.embedding_cache[question_id] = embedding
         except Exception as e:
             self.logger.log_error(e, f"保存embedding缓存失败 - question_id: {question_id}")
+
+    def _rewrite_embedding_cache(self):
+        """将当前内存中的embedding缓存写回文件"""
+        try:
+            with open(self.embedding_cache_path, 'w', encoding='utf-8') as f:
+                for question_id, embedding in self.embedding_cache.items():
+                    f.write(json.dumps({
+                        'question_id': question_id,
+                        'embedding': embedding
+                    }, ensure_ascii=False) + '\n')
+        except Exception as e:
+            self.logger.log_error(e, "重写embedding缓存失败")
+
+    def _update_embedding_cache(self, question_id: int, embedding: List[float]):
+        """更新指定题目的embedding缓存"""
+        self.embedding_cache[question_id] = embedding
+        self._rewrite_embedding_cache()
     
     def _get_detailed_instruct(self, task_description: str, query: str) -> str:
         """获取带指令的查询文本"""
@@ -261,6 +278,50 @@ class QuestionManager:
         finally:
             conn.close()
     
+    def update_question(self, question_id: int, latex_content: str,
+                        reference_answer: Optional[str], current_user_id: int) -> Optional[Dict]:
+        """更新题目信息并刷新对应的embedding"""
+        if not latex_content or not latex_content.strip():
+            raise ValueError("题目内容不能为空")
+
+        reference_answer = reference_answer if reference_answer is not None else ''
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('SELECT user_id FROM questions WHERE id = ?', (question_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError('题目不存在')
+            owner_id = row[0]
+            if owner_id != current_user_id:
+                raise PermissionError('无权修改该题目')
+
+            cursor.execute('''
+                UPDATE questions
+                SET latex_content = ?, reference_answer = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND user_id = ?
+            ''', (latex_content, reference_answer, question_id, current_user_id))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
+        updated_question = self.get_question_by_id(question_id, current_user_id)
+        if updated_question:
+            try:
+                question_text = self._get_question_text(updated_question)
+                embeddings = self.ocr_client.get_embeddings([question_text])
+                if embeddings and len(embeddings) > 0:
+                    self._update_embedding_cache(question_id, embeddings[0])
+            except Exception as e:
+                self.logger.log_error(e, f"更新题目embedding失败 - question_id: {question_id}")
+
+        return updated_question
+
     def get_questions_by_tags(self, tags: List[str], current_user_id: int = None) -> List[Dict]:
         """
         根据标签查询题目（考虑可见性）
@@ -414,6 +475,83 @@ class QuestionManager:
         except Exception as e:
             self.logger.log_error(e, "自动打标失败")
             return [], "自动生成解答失败，请手动输入", content
+
+    def generate_question_variant(self, question: Dict) -> Dict:
+        """基于原题生成微调后的题目变体"""
+        if not question:
+            raise ValueError('题目信息缺失，无法生成变体')
+
+        latex_content = question.get('latex_content', '').strip()
+        reference_answer = question.get('reference_answer', '').strip()
+        tags = question.get('tags', [])
+        images = question.get('image', [])
+
+        if not latex_content:
+            raise ValueError('题目内容为空，无法生成变体')
+
+        image_instruction = ''
+        if images:
+            image_instruction = f"题目包含图片引用（{', '.join(images)}），请保持图片数量与引用一致，不要修改图片内容。"
+
+        tag_instruction = ''
+        if tags:
+            tag_instruction = f"题目的核心知识点标签包括：{', '.join(tags)}。"
+
+        prompt = f"""
+你是一名资深命题教师，请基于给定的题目生成一个经过微调的新题。请遵循以下原则：
+
+1. 保留题目的核心考察点和大致难度，但可以通过替换数据、调整已知条件、引入边界或特殊情形等方式实现变化。
+2. 确保题目叙述清晰、逻辑自洽，所有符号、单位、条件和结论互相匹配。
+3. {image_instruction}
+4. {tag_instruction}
+5. 如果原题包含参考解答，请为新题给出更新后的参考解答；若原题无解答，可补充一个清晰的解答步骤。
+6. 输出请使用有效的LaTeX语法，保持题面与解答格式规范。
+
+请直接按照以下JSON格式回复，不要提供额外说明：
+{{
+  "latex_content": "新的题目内容",
+  "reference_answer": "新的参考解答，可为空字符串",
+  "tags": ["可选的新标签数组"]
+}}
+
+原题内容：
+{latex_content}
+
+原题参考解答：
+{reference_answer or '暂无参考解答'}
+"""
+
+        self.logger.log_llm_prompt(prompt, "AI变题")
+
+        response = self.llm_client.chat.completions.create(
+            model=LLM_CONFIG["model"],
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=LLM_CONFIG["max_tokens"],
+            temperature=LLM_CONFIG["temperature"]
+        )
+        content = response.choices[0].message.content
+
+        self.logger.log_llm_response(content, "AI变题")
+
+        try:
+            match = re.search(r'\{.*\}', content, re.DOTALL)
+            if not match:
+                raise ValueError('模型输出格式不符合JSON要求')
+            payload = repair_json(match.group(0))
+            variant = json.loads(payload)
+        except Exception as e:
+            self.logger.log_error(e, "解析AI变题结果失败")
+            raise ValueError('AI生成的内容解析失败，请稍后重试')
+
+        new_content = variant.get('latex_content', '').strip() or latex_content
+        new_answer = variant.get('reference_answer', variant.get('answer', '')).strip()
+        new_tags = variant.get('tags', tags)
+
+        return {
+            'latex_content': new_content,
+            'reference_answer': new_answer,
+            'tags': new_tags
+        }
     
     def parse_exam_paper(self, markdown_content: str, image_filename_mapping: Dict[str, str] = None) -> List[Dict]:
         """

@@ -351,7 +351,21 @@ async function handleReExport() {
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `${title}_${new Date().getTime()}.${format}`;
+            
+            // 格式化时间：YYYYMMDD_HHMMSS
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            const timeStr = `${year}${month}${day}_${hours}${minutes}${seconds}`;
+            
+            // 清理文件名：移除非法字符（Windows文件名不能包含：\ / : * ? " < > |）
+            const cleanTitle = title.replace(/[\\/:*?"<>|]/g, '_').trim() || '试卷';
+            
+            a.download = `${cleanTitle}_${timeStr}.${format}`;
             document.body.appendChild(a);
             a.click();
             window.URL.revokeObjectURL(url);

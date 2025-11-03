@@ -292,9 +292,39 @@
                 <button class="modal-close">&times;</button>
             </div>
             <div class="modal-body">
-                <div id="modal-question-content"></div>
-                <div id="modal-question-tags"></div>
-                <div id="modal-question-answer"></div>
+                <div id="modal-edit-hint" class="modal-hint hidden">
+                    <i class="fas fa-pen-to-square"></i> 编辑模式已开启，保存前的内容不会生效。
+                </div>
+                <div class="modal-section">
+                    <h4><i class="fas fa-book-open"></i> 题目内容</h4>
+                    <div id="modal-question-content" class="modal-richtext"></div>
+                    <textarea id="modal-question-editor" class="modal-editor hidden" spellcheck="false"></textarea>
+                </div>
+                <div class="modal-section" id="modal-tags-section">
+                    <h4><i class="fas fa-tags"></i> 标签</h4>
+                    <div id="modal-question-tags" class="modal-tag-container"></div>
+                </div>
+                <div class="modal-section">
+                    <h4><i class="fas fa-lightbulb"></i> 参考解答</h4>
+                    <div id="modal-question-answer" class="modal-richtext"></div>
+                    <textarea id="modal-answer-editor" class="modal-editor hidden" spellcheck="false"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="modal-actions-left">
+                    <button type="button" id="ai-variant-btn" class="btn btn-outline">
+                        <i class="fas fa-wand-magic-sparkles"></i> AI 变题
+                    </button>
+                    <button type="button" id="edit-question-btn" class="btn btn-secondary">
+                        <i class="fas fa-edit"></i> 修改题目
+                    </button>
+                </div>
+                <button type="button" id="cancel-edit-btn" class="btn btn-ghost hidden">
+                    <i class="fas fa-rotate-left"></i> 放弃修改
+                </button>
+                <button type="button" id="save-question-btn" class="btn btn-primary hidden">
+                    <i class="fas fa-save"></i> 保存修改
+                </button>
             </div>
         </div>
     </div>

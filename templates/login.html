@@ -12,9 +12,21 @@
             box-sizing: border-box;
         }
 
+        :root {
+            --color-primary: #1476ff;
+            --color-primary-dark: rgb(0, 60, 255);
+            --color-muted: #6f7895;
+            --color-text: #1d2333;
+            --color-border: #dce3ed;
+            --color-surface: #ffffff;
+            --color-surface-alt: #f4f7fb;
+            --shadow-soft: 0 18px 45px rgba(27, 50, 92, 0.16);
+            --transition-base: all 0.3s ease;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--color-surface-alt);
             min-height: 100vh;
             display: flex;
             justify-content: center;
@@ -23,19 +35,20 @@
         }
 
         .login-container {
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            background: var(--color-surface);
+            border-radius: 24px;
+            box-shadow: var(--shadow-soft);
             overflow: hidden;
             width: 100%;
-            max-width: 400px;
-            animation: fadeIn 0.5s ease;
+            max-width: 420px;
+            border: 1px solid var(--color-border);
+            animation: fadeIn 0.45s ease;
         }
 
         @keyframes fadeIn {
             from {
                 opacity: 0;
-                transform: translateY(-20px);
+                transform: translateY(-16px);
             }
             to {
                 opacity: 1;
@@ -44,53 +57,68 @@
         }
 
         .login-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 40px 30px;
+            background: linear-gradient(135deg, rgba(20, 118, 255, 0.12) 0%, rgba(169, 198, 255, 0.35) 100%);
+            color: var(--color-text);
+            padding: 36px 30px;
             text-align: center;
         }
 
         .login-header i {
             font-size: 3rem;
-            margin-bottom: 15px;
+            margin-bottom: 18px;
             display: block;
+            color: var(--color-primary);
         }
 
         .login-header h1 {
             font-size: 1.8rem;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
+            font-weight: 600;
         }
 
         .login-header p {
-            font-size: 0.9rem;
-            opacity: 0.9;
+            font-size: 0.95rem;
+            color: var(--color-muted);
         }
 
         .login-tabs {
             display: flex;
-            border-bottom: 1px solid #e9ecef;
+            border-bottom: 1px solid var(--color-border);
+            background: var(--color-surface);
         }
 
         .login-tab {
             flex: 1;
-            padding: 15px;
+            padding: 16px 0;
             background: transparent;
             border: none;
             cursor: pointer;
             font-size: 1rem;
             font-weight: 500;
-            color: #666;
-            transition: all 0.3s ease;
+            color: var(--color-muted);
+            transition: var(--transition-base);
             border-bottom: 3px solid transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .login-tab:hover {
+            color: var(--color-primary);
+            background: rgba(20, 118, 255, 0.06);
         }
 
         .login-tab.active {
-            color: #667eea;
-            border-bottom-color: #667eea;
+            color: var(--color-primary-dark);
+            border-bottom-color: var(--color-primary);
+            font-weight: 600;
+            box-shadow: inset 0 -2px 0 rgba(20, 118, 255, 0.45);
         }
 
         .login-body {
             padding: 30px;
+            background: var(--color-surface);
         }
 
         .tab-content {
@@ -109,77 +137,83 @@
             display: block;
             margin-bottom: 8px;
             font-weight: 500;
-            color: #333;
-            font-size: 0.9rem;
+            color: var(--color-text);
+            font-size: 0.95rem;
         }
 
         .form-group label i {
             margin-right: 8px;
-            color: #667eea;
+            color: var(--color-primary);
             width: 16px;
         }
 
         .form-group input {
             width: 100%;
-            padding: 12px 15px;
-            border: 2px solid #e1e5e9;
-            border-radius: 8px;
+            padding: 12px 14px;
+            border: 1px solid var(--color-border);
+            border-radius: 10px;
             font-size: 1rem;
-            transition: all 0.3s ease;
+            transition: var(--transition-base);
+            background: var(--color-surface-alt);
         }
 
         .form-group input:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px rgba(20, 118, 255, 0.12);
+            background: var(--color-surface);
         }
 
         .btn {
             width: 100%;
             padding: 12px 20px;
             border: none;
-            border-radius: 8px;
+            border-radius: 12px;
             font-size: 1rem;
             font-weight: 500;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: var(--transition-base);
             display: flex;
             align-items: center;
             justify-content: center;
+            gap: 8px;
         }
 
         .btn i {
-            margin-right: 8px;
+            margin-right: 4px;
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            background: linear-gradient(135deg, #5b9bff, var(--color-primary));
+            color: #ffffff;
+            box-shadow: 0 18px 32px rgba(20, 118, 255, 0.26);
         }
 
         .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+            transform: translateY(-1px);
+            box-shadow: 0 22px 36px rgba(20, 118, 255, 0.32);
         }
 
         .message {
-            padding: 12px 15px;
-            border-radius: 8px;
+            padding: 12px 16px;
+            border-radius: 12px;
             margin-bottom: 20px;
-            font-size: 0.9rem;
+            font-size: 0.95rem;
             display: none;
+            border: 1px solid transparent;
         }
 
         .message.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+            background: #e7f5ff;
+            color: var(--color-primary-dark);
+            border-color: rgba(20, 118, 255, 0.3);
         }
 
         .message.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
+            background: #ffe8e6;
+            color: #b82f2f;
+            border-color: rgba(184, 47, 47, 0.25);
         }
 
         .message.show {
@@ -196,15 +230,29 @@
             width: 30px;
             height: 30px;
             border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
+            border-top: 3px solid var(--color-primary);
             border-radius: 50%;
             animation: spin 1s linear infinite;
-            margin: 0 auto;
+            margin: 0 auto 12px;
         }
 
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 480px) {
+            body {
+                padding: 16px;
+            }
+
+            .login-container {
+                border-radius: 20px;
+            }
+
+            .login-body {
+                padding: 24px;
+            }
         }
     </style>
 </head>

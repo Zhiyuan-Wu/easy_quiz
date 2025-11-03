@@ -5,6 +5,7 @@
 
 import os
 import uuid
+import shutil
 import base64
 import requests
 from datetime import datetime
@@ -17,7 +18,7 @@ from docx.oxml.shared import OxmlElement, qn
 from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
 import re
-from config import LATEX_COMPILE_CONFIG
+from config import LATEX_COMPILE_CONFIG, LATEX_TEMPLATE_PATH, LATEX_CLASS_PATH, LATEX_OUTPUT_DIR
 try:
     from latex2mathml.converter import convert as latex_to_mathml
     LATEX2MATHML_AVAILABLE = True
@@ -36,7 +37,7 @@ class ExportRenderer:
         """
         self.upload_folder = upload_folder
     
-    def render_latex(self, questions: List[Dict], mode: str, title: str) -> str:
+    def render_latex(self, questions: List[Dict], mode: str, title: str, return_metadata: bool = False):
         """
         生成LaTeX格式试卷
         
@@ -44,76 +45,82 @@ class ExportRenderer:
             questions: 题目列表
             mode: 导出模式 (questions/with-answers)
             title: 试卷标题
+            return_metadata: 是否返回元数据（输出目录、依赖文件等）
             
         Returns:
-            LaTeX内容字符串
+            LaTeX内容字符串，或者如果return_metadata=True，返回(latex_content, metadata)元组
+            metadata包含: {
+                'output_dir': 输出目录路径,
+                'cls_file': cls文件路径,
+                'tex_file': tex文件路径,
+                'image_files': 图片文件列表（文件名到完整路径的映射）
+            }
         """
-        # 获取当前日期
-        current_date = datetime.now().strftime("%Y年%m月%d日")
+        if not os.path.exists(LATEX_TEMPLATE_PATH):
+            raise FileNotFoundError(f"未找到LaTeX模板文件: {LATEX_TEMPLATE_PATH}")
+
+        if not os.path.exists(LATEX_CLASS_PATH):
+            raise FileNotFoundError(f"未找到exam-zh.cls文件: {LATEX_CLASS_PATH}")
+
+        os.makedirs(LATEX_OUTPUT_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir_name = f"paper_{timestamp}_{uuid.uuid4().hex[:6]}"
+        output_dir = os.path.join(LATEX_OUTPUT_DIR, output_dir_name)
+        os.makedirs(output_dir, exist_ok=True)
+
+        class_target = os.path.join(output_dir, os.path.basename(LATEX_CLASS_PATH))
+        shutil.copy2(LATEX_CLASS_PATH, class_target)
+
+        with open(LATEX_TEMPLATE_PATH, 'r', encoding='utf-8') as f:
+            template = f.read()
+
+        copied_images: Dict[str, str] = {}
+        question_blocks: List[str] = []
+
+        for index, question in enumerate(questions, 1):
+            block = self._build_question_block(
+                question=question,
+                index=index,
+                mode=mode,
+                output_dir=output_dir,
+                copied_images=copied_images
+            )
+            if block:
+                question_blocks.append(block)
+
+        question_block_str = "\n\n".join(question_blocks)
+
+        subject = "数学试卷"
+        section_summary = f"题目：共 {len(questions)} 小题。"
+
+        latex_content = (template
+                         .replace('{{TITLE}}', title or '数学试卷')
+                         .replace('{{SUBJECT}}', subject)
+                         .replace('{{SECTION_SUMMARY}}', section_summary)
+                         .replace('{{QUESTION_BLOCK}}', question_block_str))
+
+        safe_title = re.sub(r'[^0-9A-Za-z\u4e00-\u9fa5_-]+', '_', title or 'exam')
+        output_tex_path = os.path.join(output_dir, f"{safe_title}.tex")
+        with open(output_tex_path, 'w', encoding='utf-8') as f:
+            f.write(latex_content)
+
+        if return_metadata:
+            # 构建图片文件映射（文件名 -> 完整路径）
+            image_files = {}
+            for orig_path, filename in copied_images.items():
+                image_full_path = os.path.join(output_dir, filename)
+                if os.path.exists(image_full_path):
+                    image_files[filename] = image_full_path
+            
+            metadata = {
+                'output_dir': output_dir,
+                'cls_file': class_target,
+                'tex_file': output_tex_path,
+                'image_files': image_files
+            }
+            return latex_content, metadata
         
-        content = f"""\\documentclass[12pt,a4paper]{{article}}
-\\usepackage[UTF8]{{ctex}}
-\\usepackage{{amsmath}}
-\\usepackage{{amssymb}}
-\\usepackage{{geometry}}
-\\usepackage{{graphicx}}
-\\usepackage{{enumerate}}
-\\usepackage{{itemize}}
-\\geometry{{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}}
-
-\\title{{{title}}}
-\\author{{}}
-\\date{{{current_date}}}
-
-\\begin{{document}}
-\\maketitle
-
-\\vspace{{1cm}}
-\\hrule
-\\vspace{{0.5cm}}
-
-"""
-        
-        # 添加题目
-        for i, question in enumerate(questions, 1):
-            content += f"\\section*{{题目 {i}}}\n\n"
-            
-            # 处理题目内容，确保LaTeX格式正确
-            latex_content = self._clean_latex_content(question.get('latex_content', ''))
-            content += latex_content + "\n\n"
-            
-            # 处理图片（需要转换为绝对路径或相对路径）
-            images = question.get('image', [])
-            for img_path in images:
-                if img_path:
-                    # 处理图片路径：如果是以/uploads/开头，需要转换为实际文件路径
-                    if img_path.startswith('/uploads/'):
-                        local_path = img_path.replace('/uploads/', self.upload_folder + '/')
-                        if os.path.exists(local_path):
-                            # 使用相对路径或者绝对路径
-                            # 为了兼容，我们使用相对于tex文件的位置
-                            relative_path = local_path.replace('\\', '/')
-                            content += f"\\begin{{center}}\n"
-                            content += f"\\includegraphics[width=0.8\\textwidth]{{{relative_path}}}\n"
-                            content += f"\\end{{center}}\n\n"
-                    else:
-                        # 直接使用提供的路径
-                        content += f"\\begin{{center}}\n"
-                        content += f"\\includegraphics[width=0.8\\textwidth]{{{img_path}}}\n"
-                        content += f"\\end{{center}}\n\n"
-            
-            # 如果包含答案模式，添加参考解答
-            if mode == 'with-answers' and question.get('reference_answer'):
-                content += "\\subsection*{参考解答}\n\n"
-                answer_content = self._clean_latex_content(question['reference_answer'])
-                content += answer_content + "\n\n"
-            
-            # 添加分隔线
-            if i < len(questions):
-                content += "\\vspace{0.5cm}\n\\hrule\n\\vspace{0.5cm}\n\n"
-        
-        content += "\\end{document}"
-        return content
+        return latex_content
     
     def render_docx(self, questions: List[Dict], mode: str, title: str) -> str:
         """
@@ -213,47 +220,130 @@ class ExportRenderer:
         Returns:
             文件路径
         """
-        # 首先生成LaTeX内容
-        latex_content = self.render_latex(questions, mode, title)
+        # 首先生成LaTeX内容和元数据
+        latex_content, metadata = self.render_latex(questions, mode, title, return_metadata=True)
         
         # 调用LaTeX编译API
-        try:
-            api_url = LATEX_COMPILE_CONFIG["api_url"]
-            compile_recipe = LATEX_COMPILE_CONFIG.get("compile_recipe")
-            
-            payload = {
-                "latex_content": latex_content
-            }
-            if compile_recipe:
-                payload["compile_recipe"] = compile_recipe
-            
-            response = requests.post(api_url, json=payload, timeout=120)
-            
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("success") and result.get("pdf_base64"):
-                    # 解码PDF并保存
-                    pdf_filename = f'paper_{uuid.uuid4().hex[:8]}.pdf'
-                    pdf_path = os.path.join(self.upload_folder, pdf_filename)
-                    
-                    pdf_data = base64.b64decode(result["pdf_base64"])
-                    with open(pdf_path, 'wb') as f:
-                        f.write(pdf_data)
-                    
-                    return pdf_path
-                else:
-                    raise Exception(result.get("error", "Unknown error"))
-            else:
-                raise Exception(f"API request failed: {response.status_code}")
+        api_url = LATEX_COMPILE_CONFIG["api_url"]
+        compile_recipe = LATEX_COMPILE_CONFIG.get("compile_recipe")
+        
+        # 读取图像文件内容并转换为base64编码
+        image_data = {}
+        for filename, image_path in metadata['image_files'].items():
+            if os.path.exists(image_path):
+                with open(image_path, 'rb') as f:
+                    image_bytes = f.read()
+                    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                    image_data[filename] = image_base64
+        
+        # 构建依赖文件信息（只传递图像数据，不传递路径）
+        dependencies = {
+            'image_files': image_data  # 文件名 -> base64编码的数据
+        }
+        
+        payload = {
+            "latex_content": latex_content,
+            "dependencies": dependencies
+        }
+        if compile_recipe:
+            payload["compile_recipe"] = compile_recipe
+        
+        response = requests.post(api_url, json=payload, timeout=120)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("success") and result.get("pdf_base64"):
+                # 解码PDF并保存
+                pdf_filename = f'paper_{uuid.uuid4().hex[:8]}.pdf'
+                pdf_path = os.path.join(self.upload_folder, pdf_filename)
                 
-        except Exception as e:
-            print(f"PDF编译失败: {e}")
-            # 如果编译失败，保存LaTeX文件作为备用
-            tex_filename = f'paper_{uuid.uuid4().hex[:8]}.tex'
-            tex_path = os.path.join(self.upload_folder, tex_filename)
-            with open(tex_path, 'w', encoding='utf-8') as f:
-                f.write(latex_content)
-            return tex_path
+                pdf_data = base64.b64decode(result["pdf_base64"])
+                with open(pdf_path, 'wb') as f:
+                    f.write(pdf_data)
+                
+                return pdf_path
+            else:
+                raise Exception(result.get("error", "Unknown error"))
+        else:
+            raise Exception(f"API request failed: {response.status_code}")
+
+    def _build_question_block(self, question: Dict, index: int, mode: str, output_dir: str,
+                              copied_images: Dict[str, str]) -> str:
+        latex_body = question.get('latex_content', '') or ''
+        latex_body = self._convert_enumerate_to_choices(latex_body)
+
+        images = question.get('image') or []
+        image_snippets = []
+        for img_path in images:
+            filename = self._copy_image_to_output(img_path, output_dir, copied_images, index)
+            if filename:
+                image_snippets.append(
+                    f"\\textfigure{{\\centering}}{{\\includegraphics[width=0.45\\textwidth]{{{filename}}}}}"
+                )
+
+        if image_snippets:
+            latex_body = latex_body.rstrip() + "\n" + "\n".join(image_snippets)
+
+        if not latex_body.strip():
+            latex_body = '\textit{（本题内容暂缺）}'
+
+        parts = [
+            f"% Question {index}",
+            "\\begin{question}",
+            latex_body.strip(),
+            "\\end{question}"
+        ]
+
+        reference_answer = question.get('reference_answer', '') or ''
+        if mode == 'with-answers' and reference_answer.strip():
+            parts.extend([
+                "\\begin{solution}",
+                reference_answer.strip(),
+                "\\end{solution}"
+            ])
+
+        return "\n".join(part for part in parts if part)
+
+    def _convert_enumerate_to_choices(self, content: str) -> str:
+        if not content:
+            return ''
+        processed = re.sub(r'\\begin\{enumerate\}(\[[^\]]*\])?', r'\\begin{choices}\1', content)
+        processed = re.sub(r'\\end\{enumerate\}', r'\\end{choices}', processed)
+        processed = re.sub(r'\\begin\{Enumerate\}(\[[^\]]*\])?', r'\\begin{choices}\1', processed)
+        processed = re.sub(r'\\end\{Enumerate\}', r'\\end{choices}', processed)
+        return processed
+
+    def _copy_image_to_output(self, image_path: str, output_dir: str,
+                               copied_images: Dict[str, str], index: int) -> str:
+        if not image_path:
+            return ''
+
+        if image_path in copied_images:
+            return copied_images[image_path]
+
+        clean_path = image_path.lstrip('/')
+        if clean_path.startswith('uploads/'):
+            clean_path = clean_path[len('uploads/'):]
+
+        absolute_path = os.path.join(self.upload_folder, clean_path)
+        if not os.path.exists(absolute_path):
+            print(f"图片文件不存在: {absolute_path}")
+            return ''
+
+        base_name = os.path.basename(clean_path)
+        name, ext = os.path.splitext(base_name)
+        dest_filename = f"q{index}_{name}{ext}"
+        dest_path = os.path.join(output_dir, dest_filename)
+        counter = 1
+        while os.path.exists(dest_path):
+            dest_filename = f"q{index}_{name}_{counter}{ext}"
+            dest_path = os.path.join(output_dir, dest_filename)
+            counter += 1
+
+        shutil.copy2(absolute_path, dest_path)
+        copied_name = dest_filename.replace('\\', '/')
+        copied_images[image_path] = copied_name
+        return copied_name
     
     def _clean_latex_content(self, content: str) -> str:
         """
