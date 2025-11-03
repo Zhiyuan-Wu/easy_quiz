@@ -259,9 +259,11 @@ def compile_latex():
             
             result = subprocess.run(
                 cmd,
-                shell=True,
+                shell=False,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',  # 替换无法解码的字符，避免UnicodeDecodeError
                 timeout=60,
                 cwd=str(temp_dir)  # 在临时目录中执行命令
             )
