@@ -31,6 +31,31 @@ const loading = document.getElementById('loading');
 const message = document.getElementById('message');
 const messageText = document.getElementById('message-text');
 const messageClose = document.getElementById('message-close');
+const modalQuestionContent = document.getElementById('modal-question-content');
+const modalQuestionTags = document.getElementById('modal-question-tags');
+const modalQuestionAnswer = document.getElementById('modal-question-answer');
+const modalQuestionEditor = document.getElementById('modal-question-editor');
+const modalAnswerEditor = document.getElementById('modal-answer-editor');
+const editQuestionBtn = document.getElementById('edit-question-btn');
+const saveQuestionBtn = document.getElementById('save-question-btn');
+const cancelEditBtn = document.getElementById('cancel-edit-btn');
+const aiVariantBtn = document.getElementById('ai-variant-btn');
+const modalEditHint = document.getElementById('modal-edit-hint');
+const modalTagsSection = document.getElementById('modal-tags-section');
+
+const modalState = {
+    questionId: null,
+    original: null,
+    isEditing: false,
+    aiSuggested: false,
+    draft: {
+        latex_content: '',
+        reference_answer: ''
+    }
+};
+
+let saveEditLoading = false;
+let aiVariantLoading = false;
 
 // 图片上传相关
 const imageUpload = document.getElementById('image-upload');
@@ -216,6 +241,33 @@ function setupEventListeners() {
     // 购物车操作
     clearCartBtn.addEventListener('click', clearCart);
     exportPaperBtn.addEventListener('click', exportPaper);
+
+    if (editQuestionBtn) {
+        editQuestionBtn.addEventListener('click', handleEditQuestion);
+    }
+    if (saveQuestionBtn) {
+        saveQuestionBtn.addEventListener('click', handleSaveQuestion);
+    }
+    if (cancelEditBtn) {
+        cancelEditBtn.addEventListener('click', handleCancelEdit);
+    }
+    if (aiVariantBtn) {
+        aiVariantBtn.addEventListener('click', handleAiVariant);
+    }
+    if (modalQuestionEditor) {
+        modalQuestionEditor.addEventListener('input', () => {
+            if (modalState.isEditing) {
+                modalState.draft.latex_content = modalQuestionEditor.value;
+            }
+        });
+    }
+    if (modalAnswerEditor) {
+        modalAnswerEditor.addEventListener('input', () => {
+            if (modalState.isEditing) {
+                modalState.draft.reference_answer = modalAnswerEditor.value;
+            }
+        });
+    }
 }
 
 // 登出
@@ -620,60 +672,15 @@ function renderQuestionList() {
 async function viewQuestion(questionId) {
     try {
         showLoading(true);
-        
         const response = await fetch(`/api/questions/${questionId}`);
         const result = await response.json();
         
-        if (result.success) {
-            const question = result.question;
-            
-            // 构建题目内容HTML，包含图片
-            let contentHtml = `
-                <h4>题目内容</h4>
-                <div class="question-detail">${renderMathContent(question.latex_content)}</div>
-            `;
-            
-            // 添加图片显示
-            if (question.image && question.image.length > 0) {
-                const imageScale = APP_CONFIG.imageDisplay.defaultScale;
-                const imagesHtml = question.image.map(img => {
-                    // 处理图片路径：如果是以/uploads/开头，转换为/images/路径
-                    let imageSrc = img;
-                    if (imageSrc.startsWith('/uploads/')) {
-                        imageSrc = imageSrc.replace('/uploads/', '/images/');
-                    }
-                    return `<img src="${imageSrc}" alt="题目图片" style="max-width: ${imageScale * 100}%; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px;">`;
-                }).join('');
-                contentHtml += `<div class="question-images" style="margin-top: 15px;">${imagesHtml}</div>`;
-            }
-            
-            document.getElementById('modal-question-content').innerHTML = contentHtml;
-            
-            document.getElementById('modal-question-tags').innerHTML = `
-                <h4>标签</h4>
-                <div class="question-tags">
-                    ${question.tags.map(tag => `<span class="question-tag">${tag}</span>`).join('')}
-                </div>
-            `;
-            
-            if (question.reference_answer) {
-                document.getElementById('modal-question-answer').innerHTML = `
-                    <h4>参考解答</h4>
-                    <div class="answer-detail">${renderMathContent(question.reference_answer)}</div>
-                `;
-            } else {
-                document.getElementById('modal-question-answer').innerHTML = '';
-            }
-            
-            questionModal.style.display = 'block';
-            
-            // 重新渲染数学公式
-            if (window.MathJax) {
-                MathJax.typesetPromise();
-            }
-        } else {
-            showMessage('获取题目详情失败: ' + result.message, 'error');
+        if (!result.success) {
+            showMessage('获取题目详情失败: ' + (result.message || '未知错误'), 'error');
+            return;
         }
+
+        openQuestionModal(result.question);
     } catch (error) {
         showMessage('获取题目详情失败: ' + error.message, 'error');
     } finally {
@@ -684,7 +691,11 @@ async function viewQuestion(questionId) {
 
 // 关闭模态框
 function closeModal() {
+    if (modalState.isEditing && modalState.original) {
+        exitEditMode(true);
+    }
     questionModal.style.display = 'none';
+    resetModalState();
 }
 
 // 切换页面
@@ -701,6 +712,420 @@ function updatePagination() {
     pageInfo.textContent = `第 ${currentPage} 页`;
     prevPageBtn.disabled = currentPage <= 1;
     nextPageBtn.disabled = currentPage >= totalPages;
+}
+
+function openQuestionModal(question) {
+    if (!question) {
+        return;
+    }
+
+    modalState.questionId = question.id;
+    modalState.original = question;
+    modalState.aiSuggested = false;
+    modalState.isEditing = false;
+    modalState.draft = {
+        latex_content: question.latex_content || '',
+        reference_answer: question.reference_answer || ''
+    };
+
+    renderModalContent(question);
+    updateModalEditingUI();
+    questionModal.style.display = 'block';
+    renderMath();
+}
+
+function renderModalContent(question) {
+    if (!question) {
+        if (modalQuestionContent) {
+            modalQuestionContent.innerHTML = '';
+        }
+        if (modalQuestionAnswer) {
+            modalQuestionAnswer.innerHTML = '';
+        }
+        if (modalQuestionEditor) {
+            modalQuestionEditor.value = '';
+        }
+        if (modalAnswerEditor) {
+            modalAnswerEditor.value = '';
+        }
+        return;
+    }
+
+    const latexContent = question.latex_content || '';
+    let contentHtml = renderMathContent(latexContent);
+
+    if (question.image && question.image.length > 0) {
+        const imageScale = APP_CONFIG.imageDisplay.defaultScale;
+        const imagesHtml = question.image.map(img => {
+            let imageSrc = img;
+            if (imageSrc.startsWith('/uploads/')) {
+                imageSrc = imageSrc.replace('/uploads/', '/images/');
+            }
+            return `<img src="${imageSrc}" alt="题目图片" style="max-width: ${imageScale * 100}%;">`;
+        }).join('');
+        contentHtml += `<div class="question-images">${imagesHtml}</div>`;
+    }
+
+    if (modalQuestionContent) {
+        modalQuestionContent.innerHTML = contentHtml || '<p class="modal-annotation">暂无题面内容</p>';
+    }
+
+    const answerContent = question.reference_answer || '';
+    if (modalQuestionAnswer) {
+        if (answerContent) {
+            modalQuestionAnswer.innerHTML = renderMathContent(answerContent);
+        } else {
+            modalQuestionAnswer.innerHTML = '<p class="modal-annotation">暂无参考解答</p>';
+        }
+    }
+
+    populateModalTags(question.tags || []);
+
+    if (modalQuestionEditor) {
+        modalQuestionEditor.value = modalState.draft.latex_content ?? latexContent;
+    }
+    if (modalAnswerEditor) {
+        modalAnswerEditor.value = modalState.draft.reference_answer ?? answerContent;
+    }
+}
+
+function populateModalTags(tags) {
+    if (!modalQuestionTags || !modalTagsSection) {
+        return;
+    }
+
+    if (!tags || tags.length === 0) {
+        modalTagsSection.classList.add('hidden');
+        modalQuestionTags.innerHTML = '<span class="modal-annotation">暂无标签</span>';
+        return;
+    }
+
+    modalTagsSection.classList.remove('hidden');
+    modalQuestionTags.innerHTML = tags.map(tag => `<span class="modal-tag-chip"><i class="fas fa-hashtag"></i>${tag}</span>`).join('');
+}
+
+function handleEditQuestion() {
+    if (!modalState.original || saveEditLoading || aiVariantLoading) {
+        return;
+    }
+    enterEditMode();
+}
+
+function enterEditMode(options = {}) {
+    if (!modalState.original) {
+        return;
+    }
+
+    const preserveDraft = options.preserveDraft === true;
+    if (!preserveDraft) {
+        modalState.draft = {
+            latex_content: modalState.original.latex_content || '',
+            reference_answer: modalState.original.reference_answer || ''
+        };
+    }
+
+    modalState.isEditing = true;
+    updateModalEditingUI();
+
+    if (modalQuestionEditor) {
+        modalQuestionEditor.focus({ preventScroll: false });
+        const length = modalQuestionEditor.value.length;
+        modalQuestionEditor.setSelectionRange(length, length);
+    }
+}
+
+function handleCancelEdit() {
+    if (!modalState.isEditing) {
+        return;
+    }
+    exitEditMode(true);
+    showMessage('已取消修改', 'warning');
+}
+
+async function handleSaveQuestion() {
+    if (!modalState.isEditing || !modalState.questionId || saveEditLoading) {
+        return;
+    }
+
+    const updatedLatex = (modalQuestionEditor.value || '').trim();
+    const updatedAnswer = modalAnswerEditor.value ? modalAnswerEditor.value.trim() : '';
+
+    if (!updatedLatex) {
+        showMessage('题目内容不能为空', 'error');
+        modalQuestionEditor.focus();
+        return;
+    }
+
+    try {
+        setSaveButtonLoading(true);
+        const response = await fetch(`/api/questions/${modalState.questionId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                latex_content: updatedLatex,
+                reference_answer: updatedAnswer
+            })
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+            showMessage('保存失败: ' + (result.message || '未知错误'), 'error');
+            return;
+        }
+
+        const updatedQuestion = result.question || result.data || {
+            ...modalState.original,
+            latex_content: updatedLatex,
+            reference_answer: updatedAnswer
+        };
+
+        exitEditMode(false, updatedQuestion);
+        refreshQuestionCollections(updatedQuestion);
+        showMessage('题目已更新', 'success');
+    } catch (error) {
+        showMessage('保存失败: ' + error.message, 'error');
+    } finally {
+        setSaveButtonLoading(false);
+    }
+}
+
+function exitEditMode(resetDraft = false, updatedQuestion = null) {
+    if (resetDraft && modalState.original) {
+        modalState.draft = {
+            latex_content: modalState.original.latex_content || '',
+            reference_answer: modalState.original.reference_answer || ''
+        };
+        modalState.aiSuggested = false;
+    }
+
+    if (updatedQuestion) {
+        modalState.original = updatedQuestion;
+        modalState.draft = {
+            latex_content: updatedQuestion.latex_content || '',
+            reference_answer: updatedQuestion.reference_answer || ''
+        };
+        modalState.aiSuggested = false;
+    }
+
+    modalState.isEditing = false;
+    if (modalState.original) {
+        renderModalContent(modalState.original);
+    }
+    updateModalEditingUI();
+    renderMath();
+}
+
+function updateModalEditingUI() {
+    const editing = modalState.isEditing;
+
+    if (modalQuestionContent) {
+        modalQuestionContent.classList.toggle('hidden', editing);
+    }
+    if (modalQuestionEditor) {
+        modalQuestionEditor.classList.toggle('hidden', !editing);
+        if (editing) {
+            modalQuestionEditor.value = modalState.draft.latex_content || '';
+        }
+    }
+    if (modalQuestionAnswer) {
+        modalQuestionAnswer.classList.toggle('hidden', editing);
+    }
+    if (modalAnswerEditor) {
+        modalAnswerEditor.classList.toggle('hidden', !editing);
+        if (editing) {
+            modalAnswerEditor.value = modalState.draft.reference_answer || '';
+        }
+    }
+    if (editQuestionBtn) {
+        editQuestionBtn.classList.toggle('hidden', !modalState.original || editing);
+        editQuestionBtn.disabled = !modalState.original || aiVariantLoading || saveEditLoading;
+    }
+    if (cancelEditBtn) {
+        cancelEditBtn.classList.toggle('hidden', !editing);
+        cancelEditBtn.disabled = saveEditLoading;
+    }
+    if (saveQuestionBtn && !saveEditLoading) {
+        saveQuestionBtn.classList.toggle('hidden', !editing);
+    }
+    if (modalEditHint) {
+        modalEditHint.classList.toggle('hidden', !editing);
+    }
+    if (aiVariantBtn && !aiVariantLoading) {
+        aiVariantBtn.disabled = !modalState.original || saveEditLoading;
+    }
+}
+
+function setSaveButtonLoading(isLoading) {
+    saveEditLoading = isLoading;
+    if (!saveQuestionBtn) {
+        return;
+    }
+    if (isLoading) {
+        saveQuestionBtn.disabled = true;
+        saveQuestionBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 保存中...';
+        saveQuestionBtn.classList.remove('hidden');
+    } else {
+        saveQuestionBtn.disabled = false;
+        saveQuestionBtn.innerHTML = '<i class="fas fa-save"></i> 保存修改';
+        saveQuestionBtn.classList.toggle('hidden', !modalState.isEditing);
+    }
+}
+
+async function handleAiVariant() {
+    if (!modalState.questionId || aiVariantLoading) {
+        return;
+    }
+
+    try {
+        setAiVariantLoading(true);
+        showLoading(true);
+
+        const payload = {
+            latex_content: modalState.isEditing ? (modalQuestionEditor.value || '') : (modalState.original?.latex_content || ''),
+            reference_answer: modalState.isEditing ? (modalAnswerEditor.value || '') : (modalState.original?.reference_answer || '')
+        };
+
+        const response = await fetch(`/api/questions/${modalState.questionId}/ai-variant`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+            showMessage('AI变题失败: ' + (result.message || '未知错误'), 'error');
+            return;
+        }
+
+        const variant = result.variant || result.data || {};
+        const newLatex = variant.latex_content || modalState.draft.latex_content || modalState.original?.latex_content || '';
+        const newAnswer = variant.reference_answer ?? variant.answer ?? modalState.draft.reference_answer ?? modalState.original?.reference_answer ?? '';
+
+        modalState.draft = {
+            latex_content: newLatex,
+            reference_answer: newAnswer
+        };
+        modalState.aiSuggested = true;
+        modalState.isEditing = true;
+
+        const previewQuestion = {
+            ...modalState.original,
+            latex_content: newLatex,
+            reference_answer: newAnswer,
+            tags: Array.isArray(variant.tags) ? variant.tags : (modalState.original?.tags || [])
+        };
+
+        renderModalContent(previewQuestion);
+        updateModalEditingUI();
+        if (modalQuestionEditor) {
+            modalQuestionEditor.focus({ preventScroll: false });
+        }
+        renderMath();
+        showMessage('已生成新的题目草稿，请确认后保存。', 'success');
+    } catch (error) {
+        showMessage('AI变题失败: ' + error.message, 'error');
+    } finally {
+        setAiVariantLoading(false);
+        showLoading(false);
+    }
+}
+
+function setAiVariantLoading(isLoading) {
+    aiVariantLoading = isLoading;
+    if (!aiVariantBtn) {
+        return;
+    }
+    if (isLoading) {
+        aiVariantBtn.disabled = true;
+        aiVariantBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 正在生成...';
+    } else {
+        aiVariantBtn.disabled = !modalState.original || saveEditLoading;
+        aiVariantBtn.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> AI 变题';
+    }
+}
+
+function refreshQuestionCollections(updatedQuestion) {
+    if (!updatedQuestion) {
+        return;
+    }
+
+    const updateList = (list, updater) => {
+        if (!Array.isArray(list)) {
+            return;
+        }
+        const index = list.findIndex(item => item && item.id === updatedQuestion.id);
+        if (index !== -1) {
+            list[index] = { ...list[index], ...updatedQuestion };
+            if (typeof updater === 'function') {
+                updater();
+            }
+        }
+    };
+
+    updateList(currentQuestions, () => {
+        const activeTab = document.querySelector('.tab-content.active');
+        if (activeTab) {
+            if (activeTab.id === 'manage-tab') {
+                renderQuestionList();
+            } else if (activeTab.id === 'search-tab') {
+                renderSearchResults();
+            }
+        }
+    });
+
+    cart = cart.map(item => {
+        if (item && item.id === updatedQuestion.id) {
+            return { ...item, ...updatedQuestion };
+        }
+        return item;
+    });
+    updateCartBadge();
+    if (cartModal.style.display === 'block') {
+        renderCart();
+    }
+}
+
+function resetModalState() {
+    modalState.questionId = null;
+    modalState.original = null;
+    modalState.isEditing = false;
+    modalState.aiSuggested = false;
+    modalState.draft = {
+        latex_content: '',
+        reference_answer: ''
+    };
+
+    if (modalQuestionContent) {
+        modalQuestionContent.innerHTML = '';
+    }
+    if (modalQuestionTags) {
+        modalQuestionTags.innerHTML = '';
+    }
+    if (modalQuestionAnswer) {
+        modalQuestionAnswer.innerHTML = '';
+    }
+    if (modalQuestionEditor) {
+        modalQuestionEditor.value = '';
+        modalQuestionEditor.classList.add('hidden');
+    }
+    if (modalAnswerEditor) {
+        modalAnswerEditor.value = '';
+        modalAnswerEditor.classList.add('hidden');
+    }
+    if (modalEditHint) {
+        modalEditHint.classList.add('hidden');
+    }
+    if (modalTagsSection) {
+        modalTagsSection.classList.remove('hidden');
+    }
+
+    setSaveButtonLoading(false);
+    setAiVariantLoading(false);
+    updateModalEditingUI();
 }
 
 // 渲染数学内容

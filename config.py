@@ -66,3 +66,8 @@ LATEX_COMPILE_CONFIG = {
         ["xelatex", "-output-directory", "{output_dir}", "-interaction=nonstopmode", "{tex_file}"]
     ]
 }
+
+# LaTeX模板配置
+LATEX_TEMPLATE_PATH = "resources/exam_template.tex"
+LATEX_CLASS_PATH = "resources/exam-zh.cls"
+LATEX_OUTPUT_DIR = "latex_results"
