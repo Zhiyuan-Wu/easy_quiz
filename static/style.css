@@ -2168,6 +2168,163 @@ mjx-container[display="true"] {
     font-style: italic;
 }
 
+/* 自定义下拉列表样式 */
+.custom-select-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.custom-select {
+    position: relative;
+    width: 100%;
+}
+
+.custom-select-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 15px;
+    background: var(--color-surface-muted);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: var(--transition-base);
+    font-size: 1rem;
+    color: var(--color-text);
+}
+
+.custom-select-trigger:hover {
+    background: var(--color-surface);
+    border-color: rgba(20, 118, 255, 0.35);
+}
+
+.custom-select-trigger.active {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(20, 118, 255, 0.12);
+    background: var(--color-surface);
+}
+
+.custom-select-trigger.disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background: var(--color-surface-muted);
+}
+
+.custom-select-trigger.disabled:hover {
+    background: var(--color-surface-muted);
+    border-color: var(--color-border);
+}
+
+.custom-select-trigger i {
+    color: var(--color-muted);
+    transition: transform 0.3s ease;
+}
+
+.custom-select-trigger.active i {
+    transform: rotate(180deg);
+    color: var(--color-primary);
+}
+
+.custom-select-value {
+    flex: 1;
+    text-align: left;
+}
+
+.custom-select-options {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    margin-top: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    box-shadow: var(--shadow-hover);
+    z-index: 1000;
+    display: none;
+}
+
+.custom-select-options.show {
+    display: block;
+}
+
+.custom-select-option {
+    padding: 12px 15px;
+    cursor: pointer;
+    transition: var(--transition-base);
+    color: var(--color-text);
+    font-size: 1rem;
+}
+
+.custom-select-option:hover {
+    background: rgba(20, 118, 255, 0.08);
+    color: var(--color-primary);
+}
+
+.custom-select-option.selected {
+    background: rgba(20, 118, 255, 0.12);
+    color: var(--color-primary-dark);
+    font-weight: 500;
+}
+
+/* 作业上传区域样式 */
+.homework-upload-area {
+    margin-top: 10px;
+}
+
+.homework-upload-zone {
+    border: 2px dashed rgba(20, 118, 255, 0.5);
+    border-radius: 16px;
+    padding: 40px 30px;
+    text-align: center;
+    background: var(--color-surface);
+    transition: var(--transition-base);
+    cursor: pointer;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+.homework-upload-zone:hover {
+    border-color: var(--color-primary);
+    background: #eef4ff;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-hover);
+}
+
+.homework-upload-zone.dragover {
+    border-color: var(--color-primary-dark);
+    background: #e3f2ff;
+    transform: scale(1.01);
+}
+
+.homework-upload-zone .upload-icon {
+    font-size: 3rem;
+    color: var(--color-primary);
+    margin-bottom: 15px;
+}
+
+.homework-upload-zone h4 {
+    margin: 0 0 8px 0;
+    color: var(--color-text);
+    font-size: 1.2rem;
+}
+
+.homework-upload-zone p {
+    margin: 0 0 20px 0;
+    color: var(--color-muted);
+    font-size: 0.9rem;
+}
+
+.homework-preview {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-top: 20px;
+    box-shadow: var(--shadow-soft);
+}
+
 /* 滚动条样式 */
 ::-webkit-scrollbar {
     width: 8px;

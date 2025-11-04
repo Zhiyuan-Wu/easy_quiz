@@ -74,11 +74,17 @@ const homeworkModal = document.getElementById('homework-modal');
 const homeworkParseBtn = document.getElementById('homework-parse-btn');
 const homeworkSaveBtn = document.getElementById('homework-save-btn');
 const homeworkExportSelect = document.getElementById('homework-export-select');
+const homeworkExportOptions = document.getElementById('homework-export-options');
 const homeworkFileInput = document.getElementById('homework-file-input');
+const homeworkUploadZone = document.getElementById('homework-upload-zone');
+const homeworkUploadBtn = document.getElementById('homework-upload-btn');
+const homeworkPreview = document.getElementById('homework-preview');
+const removeHomeworkBtn = document.getElementById('remove-homework-btn');
 const homeworkResultsContainer = document.getElementById('homework-results');
 const homeworkResultsList = document.getElementById('homework-results-list');
 const homeworkStudentName = document.getElementById('homework-student-name');
 const homeworkStudentId = document.getElementById('homework-student-id');
+const questionTypeSelect = document.getElementById('question-type-select');
 
 const historyModal = document.getElementById('history-modal');
 const historyContent = document.getElementById('history-content');
@@ -351,6 +357,40 @@ function setupEventListeners() {
     if (homeworkSaveBtn) {
         homeworkSaveBtn.addEventListener('click', handleHomeworkSave);
     }
+    if (homeworkUploadBtn) {
+        homeworkUploadBtn.addEventListener('click', () => homeworkFileInput?.click());
+    }
+    if (homeworkUploadZone) {
+        homeworkUploadZone.addEventListener('click', (e) => {
+            if (e.target === homeworkUploadZone || e.target.closest('.upload-icon') || e.target.tagName === 'H4' || e.target.tagName === 'P') {
+                homeworkFileInput?.click();
+            }
+        });
+        homeworkUploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            homeworkUploadZone.classList.add('dragover');
+        });
+        homeworkUploadZone.addEventListener('dragleave', () => {
+            homeworkUploadZone.classList.remove('dragover');
+        });
+        homeworkUploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            homeworkUploadZone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                homeworkFileInput.files = files;
+                handleHomeworkFileUpload({ target: { files: files } });
+            }
+        });
+    }
+    if (homeworkFileInput) {
+        homeworkFileInput.addEventListener('change', handleHomeworkFileUpload);
+    }
+    if (removeHomeworkBtn) {
+        removeHomeworkBtn.addEventListener('click', removeHomeworkFile);
+    }
+    // 初始化自定义下拉列表
+    initCustomSelects();
 
     if (historyModal) {
         attachModalBackdropHandler(historyModal, () => closeModalElement(historyModal));
@@ -520,7 +560,7 @@ async function handleFormSubmit(e) {
     const selectedTags = getSelectedTags(tagSelector);
     const visibility = document.querySelector('input[name="visibility"]:checked').value;
     
-    const questionTypeValue = questionTypeSelect ? questionTypeSelect.value : '解答题';
+    const questionTypeValue = document.getElementById('question-type')?.value || '解答题';
 
     const questionData = {
         latex_content: formData.get('latex_content'),
@@ -555,8 +595,22 @@ async function handleFormSubmit(e) {
             questionForm.reset();
             uploadedImages = [];
             imagePreview.innerHTML = '';
-            if (questionTypeSelect) {
-                questionTypeSelect.value = '解答题';
+            const questionTypeHidden = document.getElementById('question-type');
+            const questionTypeSelectEl = document.getElementById('question-type-select');
+            if (questionTypeHidden) {
+                questionTypeHidden.value = '解答题';
+            }
+            if (questionTypeSelectEl) {
+                const valueSpan = questionTypeSelectEl.querySelector('.custom-select-value');
+                if (valueSpan) {
+                    valueSpan.textContent = '解答题';
+                }
+                questionTypeSelectEl.querySelectorAll('.custom-select-option').forEach(opt => {
+                    opt.classList.remove('selected');
+                    if (opt.dataset.value === '解答题') {
+                        opt.classList.add('selected');
+                    }
+                });
             }
             // 清除标签选择
             tagSelector.querySelectorAll('.tag-item').forEach(tag => {
@@ -625,10 +679,23 @@ async function handleAutoTag() {
             // 设置参考解答
             document.getElementById('reference-answer').value = result.answer;
 
-            if (questionTypeSelect) {
+            const questionTypeHidden = document.getElementById('question-type');
+            const questionTypeSelectEl = document.getElementById('question-type-select');
+            if (questionTypeSelectEl && questionTypeHidden) {
                 const allowedTypes = ['选择题', '填空题', '解答题'];
                 const modelType = (result.question_type || '').trim();
-                questionTypeSelect.value = allowedTypes.includes(modelType) ? modelType : '解答题';
+                const selectedType = allowedTypes.includes(modelType) ? modelType : '解答题';
+                questionTypeHidden.value = selectedType;
+                const valueSpan = questionTypeSelectEl.querySelector('.custom-select-value');
+                if (valueSpan) {
+                    valueSpan.textContent = selectedType;
+                }
+                questionTypeSelectEl.querySelectorAll('.custom-select-option').forEach(opt => {
+                    opt.classList.remove('selected');
+                    if (opt.dataset.value === selectedType) {
+                        opt.classList.add('selected');
+                    }
+                });
             }
             
             showMessage('自动打标和LaTeX格式化完成！', 'success');
@@ -1445,11 +1512,26 @@ function resetHomeworkState() {
     };
 
     if (homeworkExportSelect) {
-        homeworkExportSelect.innerHTML = '';
-        homeworkExportSelect.disabled = false;
+        const trigger = homeworkExportSelect.querySelector('.custom-select-trigger');
+        const valueSpan = trigger?.querySelector('.custom-select-value');
+        if (valueSpan) {
+            valueSpan.textContent = '请选择试卷';
+        }
+        if (homeworkExportOptions) {
+            homeworkExportOptions.innerHTML = '';
+        }
+        if (trigger) {
+            trigger.classList.remove('disabled');
+        }
     }
     if (homeworkFileInput) {
         homeworkFileInput.value = '';
+    }
+    if (homeworkUploadZone) {
+        homeworkUploadZone.style.display = 'block';
+    }
+    if (homeworkPreview) {
+        homeworkPreview.style.display = 'none';
     }
     if (homeworkResultsContainer) {
         homeworkResultsContainer.classList.add('hidden');
@@ -1460,6 +1542,112 @@ function resetHomeworkState() {
     if (homeworkSaveBtn) {
         homeworkSaveBtn.disabled = true;
     }
+}
+
+function handleHomeworkFileUpload(e) {
+    const file = e.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            if (homeworkUploadZone) {
+                homeworkUploadZone.style.display = 'none';
+            }
+            if (homeworkPreview) {
+                homeworkPreview.style.display = 'block';
+                const previewImage = homeworkPreview.querySelector('.preview-image');
+                if (previewImage) {
+                    previewImage.innerHTML = `<img src="${e.target.result}" alt="作业预览">`;
+                }
+            }
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+function removeHomeworkFile() {
+    if (homeworkFileInput) {
+        homeworkFileInput.value = '';
+    }
+    if (homeworkUploadZone) {
+        homeworkUploadZone.style.display = 'block';
+    }
+    if (homeworkPreview) {
+        homeworkPreview.style.display = 'none';
+    }
+}
+
+// 初始化自定义下拉列表
+function initCustomSelects() {
+    // 题目类型下拉列表
+    if (questionTypeSelect) {
+        const trigger = questionTypeSelect.querySelector('.custom-select-trigger');
+        const options = questionTypeSelect.querySelectorAll('.custom-select-option');
+        if (trigger) {
+            trigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isActive = trigger.classList.contains('active');
+                closeAllCustomSelects();
+                if (!isActive) {
+                    trigger.classList.add('active');
+                    const optionsContainer = questionTypeSelect.querySelector('.custom-select-options');
+                    if (optionsContainer) {
+                        optionsContainer.classList.add('show');
+                    }
+                }
+            });
+        }
+        options.forEach(option => {
+            option.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const value = option.dataset.value;
+                const hiddenInput = document.getElementById('question-type');
+                if (hiddenInput) {
+                    hiddenInput.value = value;
+                }
+                const valueSpan = trigger?.querySelector('.custom-select-value');
+                if (valueSpan) {
+                    valueSpan.textContent = value;
+                }
+                options.forEach(opt => opt.classList.remove('selected'));
+                option.classList.add('selected');
+                closeAllCustomSelects();
+            });
+        });
+    }
+
+    // 试卷选择下拉列表
+    if (homeworkExportSelect) {
+        const trigger = homeworkExportSelect.querySelector('.custom-select-trigger');
+        if (trigger) {
+            trigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isActive = trigger.classList.contains('active');
+                closeAllCustomSelects();
+                if (!isActive && !trigger.classList.contains('disabled')) {
+                    trigger.classList.add('active');
+                    if (homeworkExportOptions) {
+                        homeworkExportOptions.classList.add('show');
+                    }
+                }
+            });
+        }
+    }
+
+    // 点击外部关闭下拉列表
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.custom-select')) {
+            closeAllCustomSelects();
+        }
+    });
+}
+
+function closeAllCustomSelects() {
+    document.querySelectorAll('.custom-select-trigger').forEach(trigger => {
+        trigger.classList.remove('active');
+    });
+    document.querySelectorAll('.custom-select-options').forEach(options => {
+        options.classList.remove('show');
+    });
 }
 
 function updateStudentsEmptyState() {
@@ -2154,32 +2342,51 @@ async function populateExportOptions(forceReload = false) {
         }
     }
 
-    if (!homeworkExportSelect) {
+    if (!homeworkExportOptions || !homeworkExportSelect) {
         return;
     }
 
-    homeworkExportSelect.innerHTML = '';
+    homeworkExportOptions.innerHTML = '';
+    const trigger = homeworkExportSelect.querySelector('.custom-select-trigger');
+    const valueSpan = trigger?.querySelector('.custom-select-value');
 
     const exports = Array.isArray(exportHistoryCache) ? exportHistoryCache.slice() : [];
     if (exports.length === 0) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = '暂无导出的试卷';
-        homeworkExportSelect.appendChild(option);
-        homeworkExportSelect.disabled = true;
+        if (valueSpan) {
+            valueSpan.textContent = '暂无导出的试卷';
+        }
+        if (trigger) {
+            trigger.classList.add('disabled');
+        }
         return;
     }
 
     exports.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    homeworkExportSelect.disabled = false;
+    if (trigger) {
+        trigger.classList.remove('disabled');
+    }
 
     exports.forEach((exportItem) => {
-        const option = document.createElement('option');
-        option.value = exportItem.id;
+        const option = document.createElement('div');
+        option.className = 'custom-select-option';
+        option.dataset.value = exportItem.id;
         const title = exportItem.title || '未命名试卷';
         const createdAt = exportItem.created_at ? formatDate(exportItem.created_at) : '';
         option.textContent = `${title}（${createdAt}）`;
-        homeworkExportSelect.appendChild(option);
+        option.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const value = option.dataset.value;
+            homeworkState.exportId = parseInt(value);
+            if (valueSpan) {
+                valueSpan.textContent = option.textContent;
+            }
+            homeworkExportOptions.querySelectorAll('.custom-select-option').forEach(opt => {
+                opt.classList.remove('selected');
+            });
+            option.classList.add('selected');
+            closeAllCustomSelects();
+        });
+        homeworkExportOptions.appendChild(option);
     });
 }
 
@@ -2189,12 +2396,13 @@ async function handleHomeworkParse() {
         return;
     }
 
-    if (!homeworkExportSelect || homeworkExportSelect.disabled) {
+    const trigger = homeworkExportSelect?.querySelector('.custom-select-trigger');
+    if (!trigger || trigger.classList.contains('disabled')) {
         showMessage('请先准备好关联的试卷', 'error');
         return;
     }
 
-    const exportId = homeworkExportSelect.value;
+    const exportId = homeworkState.exportId;
     if (!exportId) {
         showMessage('请选择关联的试卷', 'error');
         return;

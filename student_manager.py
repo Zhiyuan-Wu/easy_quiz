@@ -102,8 +102,9 @@ class StudentManager:
                 """
                 CREATE TABLE IF NOT EXISTS students (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    student_id TEXT NOT NULL UNIQUE,
+                    student_id TEXT NOT NULL,
                     name TEXT NOT NULL,
+                    user_id INTEGER NOT NULL,
                     cached_average_score REAL,
                     cached_average_window_days INTEGER,
                     cached_average_updated_at TEXT,
@@ -112,15 +113,20 @@ class StudentManager:
                     cached_report_history_timestamp TEXT,
                     latest_history_timestamp TEXT,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(student_id, user_id)
                 )
                 """
             )
+
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_students_updated_at ON students(updated_at)"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_students_latest_history ON students(latest_history_timestamp)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_students_user_id ON students(user_id)"
             )
             conn.commit()
         finally:
@@ -167,11 +173,13 @@ class StudentManager:
     # ------------------------------------------------------------------
     # 学生基本信息
     # ------------------------------------------------------------------
-    def add_student(self, student_id: str, name: str) -> Dict:
+    def add_student(self, student_id: str, name: str, user_id: int) -> Dict:
         student_id = student_id.strip()
         name = name.strip()
         if not student_id or not name:
             raise ValueError("学号和姓名不能为空")
+        if user_id is None:
+            raise ValueError("用户ID不能为空")
 
         now = _format_timestamp(_utc_now())
         conn = self._student_conn()
@@ -179,10 +187,10 @@ class StudentManager:
             conn.execute(
                 """
                 INSERT INTO students (
-                    student_id, name, cached_average_window_days, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?)
+                    student_id, name, user_id, cached_average_window_days, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (student_id, name, ANALYTICS_WINDOW_DAYS, now, now),
+                (student_id, name, user_id, ANALYTICS_WINDOW_DAYS, now, now),
             )
             conn.commit()
         except sqlite3.IntegrityError:
@@ -190,32 +198,33 @@ class StudentManager:
         finally:
             conn.close()
 
-        return self.get_student(student_id)
+        return self.get_student(student_id, user_id)
 
-    def get_student(self, student_id: str) -> Optional[Dict]:
+    def get_student(self, student_id: str, user_id: int) -> Optional[Dict]:
         conn = self._student_conn()
         try:
             row = conn.execute(
-                "SELECT * FROM students WHERE student_id = ?",
-                (student_id,),
+                "SELECT * FROM students WHERE student_id = ? AND user_id = ?",
+                (student_id, user_id),
             ).fetchone()
             if not row:
                 return None
             student = dict(row)
             self._ensure_average_cache(student)
             refreshed = conn.execute(
-                "SELECT * FROM students WHERE student_id = ?",
-                (student_id,),
+                "SELECT * FROM students WHERE student_id = ? AND user_id = ?",
+                (student_id, user_id),
             ).fetchone()
             return dict(refreshed) if refreshed else student
         finally:
             conn.close()
 
-    def list_students(self) -> List[Dict]:
+    def list_students(self, user_id: int) -> List[Dict]:
         conn = self._student_conn()
         try:
             rows = conn.execute(
-                "SELECT * FROM students ORDER BY updated_at DESC, student_id ASC"
+                "SELECT * FROM students WHERE user_id = ? ORDER BY updated_at DESC, student_id ASC",
+                (user_id,),
             ).fetchall()
         finally:
             conn.close()
@@ -227,20 +236,23 @@ class StudentManager:
 
         # 重新读取以反映可能更新的缓存值
         if students:
-            refreshed_ids = [stu["student_id"] for stu in students]
+            refreshed_ids = [(stu["student_id"], user_id) for stu in students]
             refreshed = self._fetch_students_by_ids(refreshed_ids)
             return refreshed
         return students
 
-    def _fetch_students_by_ids(self, student_ids: List[str]) -> List[Dict]:
-        if not student_ids:
+    def _fetch_students_by_ids(self, student_id_user_pairs: List[Tuple[str, int]]) -> List[Dict]:
+        if not student_id_user_pairs:
             return []
-        placeholders = ",".join(["?"] * len(student_ids))
+        placeholders = ",".join(["(?, ?)"] * len(student_id_user_pairs))
+        params = []
+        for student_id, user_id in student_id_user_pairs:
+            params.extend([student_id, user_id])
         conn = self._student_conn()
         try:
             rows = conn.execute(
-                f"SELECT * FROM students WHERE student_id IN ({placeholders})",
-                tuple(student_ids),
+                f"SELECT * FROM students WHERE (student_id, user_id) IN ({placeholders})",
+                tuple(params),
             ).fetchall()
             return [dict(row) for row in rows]
         finally:
@@ -333,10 +345,11 @@ class StudentManager:
         export_id: int,
         paper_title: str,
         items: List[HomeworkItem],
+        user_id: int,
         raw_payload: Optional[Dict] = None,
     ) -> str:
-        if not self.get_student(student_id):
-            self.add_student(student_id, student_name)
+        if not self.get_student(student_id, user_id):
+            self.add_student(student_id, student_name, user_id)
 
         session_uid = uuid.uuid4().hex
         now_iso = _format_timestamp(_utc_now())
@@ -532,9 +545,7 @@ class StudentManager:
 {question_block}
 
 学生作业OCR文本：
-"""
 {ocr_text}
-"""
 
 评分要求：
 1. 请匹配学生答案与原题号，忽略OCR文本中与本试卷无关的内容。

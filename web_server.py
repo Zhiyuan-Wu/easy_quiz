@@ -214,7 +214,8 @@ def register():
 @login_required
 def list_students():
     try:
-        students = student_manager.list_students()
+        user_id = session['user_id']
+        students = student_manager.list_students(user_id)
         payload = []
         for stu in students:
             serialized = serialize_student(stu)
@@ -233,11 +234,12 @@ def add_student_api():
         data = request.get_json() or {}
         student_id = (data.get('student_id') or '').strip()
         name = (data.get('name') or '').strip()
+        user_id = session['user_id']
 
         if not student_id or not name:
             return jsonify({'success': False, 'message': '学号和姓名不能为空'}), 400
 
-        student = student_manager.add_student(student_id, name)
+        student = student_manager.add_student(student_id, name, user_id)
         return jsonify({'success': True, 'student': serialize_student(student)})
     except ValueError as ve:
         return jsonify({'success': False, 'message': str(ve)}), 400
@@ -283,11 +285,12 @@ def parse_student_homework(student_id):
     except ValueError:
         return jsonify({'success': False, 'message': '试卷信息无效'}), 400
 
-    student_record = student_manager.get_student(student_id)
+    user_id = session['user_id']
+    student_record = student_manager.get_student(student_id, user_id)
     if not student_record:
         if not student_name:
             return jsonify({'success': False, 'message': '请填写学生姓名'}), 400
-        student_record = student_manager.add_student(student_id, student_name)
+        student_record = student_manager.add_student(student_id, student_name, user_id)
     else:
         student_name = student_record.get('name') or student_name
 
@@ -405,11 +408,12 @@ def save_student_homework(student_id):
         if not results:
             return jsonify({'success': False, 'message': '没有可保存的作业结果'}), 400
 
-        student = student_manager.get_student(student_id)
+        user_id = session['user_id']
+        student = student_manager.get_student(student_id, user_id)
         if not student:
             if not student_name:
                 return jsonify({'success': False, 'message': '请提供学生姓名'}), 400
-            student = student_manager.add_student(student_id, student_name)
+            student = student_manager.add_student(student_id, student_name, user_id)
         else:
             student_name = student.get('name') or student_name
 
@@ -437,16 +441,18 @@ def save_student_homework(student_id):
         if not items:
             return jsonify({'success': False, 'message': '作业结果格式无效'}), 400
 
+        user_id = session['user_id']
         session_uid = student_manager.record_homework_results(
             student_id=student_id,
             student_name=student_name,
             export_id=export_id,
             paper_title=paper_title,
             items=items,
+            user_id=user_id,
             raw_payload=data,
         )
 
-        refreshed_student = student_manager.get_student(student_id)
+        refreshed_student = student_manager.get_student(student_id, user_id)
 
         return jsonify({
             'success': True,
@@ -463,7 +469,8 @@ def save_student_homework(student_id):
 @login_required
 def get_student_report(student_id):
     try:
-        student = student_manager.get_student(student_id)
+        user_id = session['user_id']
+        student = student_manager.get_student(student_id, user_id)
         if not student:
             return jsonify({'success': False, 'message': '学生不存在'}), 404
 
@@ -500,7 +507,8 @@ def get_student_report(student_id):
 @login_required
 def get_student_recommendations(student_id):
     try:
-        student = student_manager.get_student(student_id)
+        user_id = session['user_id']
+        student = student_manager.get_student(student_id, user_id)
         if not student:
             return jsonify({'success': False, 'message': '学生不存在'}), 404
 

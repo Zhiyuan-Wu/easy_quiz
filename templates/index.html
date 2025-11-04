@@ -280,11 +280,20 @@
                         <label for="question-type">
                             <i class="fas fa-list-check"></i> 题目类型
                         </label>
-                        <select id="question-type" name="question_type" class="form-select">
-                            <option value="解答题" selected>解答题</option>
-                            <option value="选择题">选择题</option>
-                            <option value="填空题">填空题</option>
-                        </select>
+                        <div class="custom-select-wrapper">
+                            <div class="custom-select" id="question-type-select">
+                                <div class="custom-select-trigger">
+                                    <span class="custom-select-value">解答题</span>
+                                    <i class="fas fa-chevron-down"></i>
+                                </div>
+                                <div class="custom-select-options">
+                                    <div class="custom-select-option" data-value="解答题">解答题</div>
+                                    <div class="custom-select-option" data-value="选择题">选择题</div>
+                                    <div class="custom-select-option" data-value="填空题">填空题</div>
+                                </div>
+                            </div>
+                        </div>
+                        <input type="hidden" id="question-type" name="question_type" value="解答题">
                         <div class="help-text">用于导出时的版面优化，自动打标将自动更新。</div>
                     </div>
 
@@ -384,16 +393,43 @@
                     <label for="homework-export-select">
                         <i class="fas fa-file-circle-check"></i> 关联试卷
                     </label>
-                    <select id="homework-export-select" class="form-select">
-                    </select>
+                    <div class="custom-select-wrapper">
+                        <div class="custom-select" id="homework-export-select">
+                            <div class="custom-select-trigger">
+                                <span class="custom-select-value">请选择试卷</span>
+                                <i class="fas fa-chevron-down"></i>
+                            </div>
+                            <div class="custom-select-options" id="homework-export-options"></div>
+                        </div>
+                    </div>
                     <div class="help-text">下拉列表显示最近导出的试卷。</div>
                 </div>
                 <div class="form-group">
                     <label for="homework-file-input">
                         <i class="fas fa-image"></i> 作业图片
                     </label>
-                    <input type="file" id="homework-file-input" accept="image/*">
-                    <div class="help-text">支持 PNG、JPG、JPEG 格式，最大 16MB。</div>
+                    <div class="homework-upload-area">
+                        <div class="homework-upload-zone" id="homework-upload-zone">
+                            <div class="upload-icon">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                            </div>
+                            <h4>点击或拖拽上传作业图片</h4>
+                            <p>支持 PNG、JPG、JPEG 格式，最大 16MB</p>
+                            <input type="file" id="homework-file-input" accept="image/*" style="display: none;">
+                            <button type="button" id="homework-upload-btn" class="btn btn-primary">
+                                <i class="fas fa-upload"></i> 选择文件
+                            </button>
+                        </div>
+                        <div id="homework-preview" class="homework-preview" style="display: none;">
+                            <div class="preview-header">
+                                <h4><i class="fas fa-image"></i> 作业预览</h4>
+                                <button type="button" id="remove-homework-btn" class="btn btn-danger btn-sm">
+                                    <i class="fas fa-times"></i> 移除
+                                </button>
+                            </div>
+                            <div class="preview-image"></div>
+                        </div>
+                    </div>
                 </div>
                 <div class="homework-actions">
                     <button id="homework-parse-btn" class="btn btn-primary">

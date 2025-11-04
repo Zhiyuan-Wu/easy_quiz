@@ -502,7 +502,7 @@ class QuestionManager:
             
             # 解析响应
             try:
-                match = re.search(r'\{.*?\}', response, re.DOTALL).group(0)
+                match = re.search(r'\{.*\}', response, re.DOTALL).group(0)
                 match = repair_json(match)
                 result = json.loads(match)
                 latex_content = result.get('latex_content', content)
