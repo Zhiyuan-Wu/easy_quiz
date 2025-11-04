@@ -27,6 +27,17 @@ from ocr_client import DeepSeekOCRClient
 import faiss
 
 QUESTION_TYPE_CHOICES = {"选择题", "填空题", "解答题"}
+DEFAULT_QUESTION_TYPE = "解答题"
+
+
+def _sanitize_question_type(value: Optional[str]) -> str:
+    if isinstance(value, str):
+        question_type = value.strip() or DEFAULT_QUESTION_TYPE
+    else:
+        question_type = DEFAULT_QUESTION_TYPE
+    if question_type not in QUESTION_TYPE_CHOICES:
+        question_type = DEFAULT_QUESTION_TYPE
+    return question_type
 
 class QuestionManager:
     """高考题目管理器类"""
@@ -159,10 +170,6 @@ class QuestionManager:
         except Exception as e:
             self.logger.log_error(e, f"保存embedding缓存失败 - question_id: {question_id}")
 
-    def _update_embedding_cache(self, question_id: int, embedding: List[float]):
-        """更新指定题目的embedding缓存"""
-        self._save_embedding_to_cache(question_id, embedding)
-    
     def _get_detailed_instruct(self, task_description: str, query: str) -> str:
         """获取带指令的查询文本"""
         return f'Instruct: {task_description}\nQuery:{query}'
@@ -277,9 +284,7 @@ class QuestionManager:
         image = image or []
         image_json = json.dumps(image, ensure_ascii=False)
         
-        question_type = (question_type or '解答题').strip()
-        if question_type not in QUESTION_TYPE_CHOICES:
-            question_type = '解答题'
+        question_type = _sanitize_question_type(question_type)
 
         self.logger.log_database_operation(
             "INSERT",
@@ -335,9 +340,7 @@ class QuestionManager:
 
             normalized_type = None
             if question_type is not None:
-                normalized_type = (question_type or '解答题').strip()
-                if normalized_type not in QUESTION_TYPE_CHOICES:
-                    normalized_type = '解答题'
+                normalized_type = _sanitize_question_type(question_type)
 
             set_clauses = ["latex_content = ?", "reference_answer = ?", "updated_at = CURRENT_TIMESTAMP"]
             params = [latex_content, reference_answer]
@@ -368,7 +371,7 @@ class QuestionManager:
                 question_text = self._get_question_text(updated_question)
                 embeddings = self.ocr_client.get_embeddings([question_text])
                 if embeddings and len(embeddings) > 0:
-                    self._update_embedding_cache(question_id, embeddings[0])
+                    self._save_embedding_to_cache(question_id, embeddings[0])
             except Exception as e:
                 self.logger.log_error(e, f"更新题目embedding失败 - question_id: {question_id}")
 
@@ -713,12 +716,7 @@ class QuestionManager:
                                 self.logger.log_warning(f"图片文件 {img_filename} 在映射中未找到", "试卷解析")
                     
                     # 确保必要字段存在
-                    raw_question_type = question.get('question_type', '解答题')
-                    if not isinstance(raw_question_type, str):
-                        raw_question_type = '解答题'
-                    normalized_question_type = raw_question_type.strip() or '解答题'
-                    if normalized_question_type not in QUESTION_TYPE_CHOICES:
-                        normalized_question_type = '解答题'
+                    normalized_question_type = _sanitize_question_type(question.get('question_type'))
 
                     validated_question = {
                         'question': question.get('question', ''),

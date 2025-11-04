@@ -389,11 +389,11 @@ class ExportRenderer:
         reference_answer = question.get('reference_answer', '') or ''
         if mode == 'with-answers' and reference_answer.strip():
             parts.extend([
+                "\\begin{tcolorbox}[colback=white,colframe=black,boxrule=0.8pt]",
                 "\\begin{solution}",
-                "\\begin{tcolorbox}[colback=white,colframe=black,boxrule=0.8pt,title={参考解答}]",
                 reference_answer.strip(),
-                "\\end{tcolorbox}",
-                "\\end{solution}"
+                "\\end{solution}",
+                "\\end{tcolorbox}"
             ])
 
         return "\n".join(part for part in parts if part)
