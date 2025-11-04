@@ -18,7 +18,6 @@ from config import (
     MAX_QUESTION_LENGTH,
     MAX_ANSWER_LENGTH,
     EMBEDDING_CACHE_DB_PATH,
-    EMBEDDING_CACHE_LEGACY_PATH,
 )
 from openai import OpenAI
 from logger import get_logger
@@ -52,10 +51,7 @@ class QuestionManager:
         if cache_dir and not os.path.exists(cache_dir):
             os.makedirs(cache_dir, exist_ok=True)
         self.embedding_cache_path = EMBEDDING_CACHE_DB_PATH
-        self.legacy_embedding_cache_path = EMBEDDING_CACHE_LEGACY_PATH
         self._ensure_embedding_store()
-        self.embedding_cache = {}
-        self._migrate_legacy_embedding_cache()
         self.embedding_cache = self._load_embedding_cache()  # question_id -> embedding vector
         
         # 异步任务锁和正在处理的question_id集合
@@ -122,32 +118,6 @@ class QuestionManager:
             conn.commit()
         finally:
             conn.close()
-
-    def _migrate_legacy_embedding_cache(self):
-        """将旧的JSONL缓存迁移到SQLite存储"""
-        legacy_path = getattr(self, 'legacy_embedding_cache_path', None)
-        if not legacy_path or not os.path.exists(legacy_path):
-            return
-
-        try:
-            with open(legacy_path, 'r', encoding='utf-8') as legacy_file:
-                for line in legacy_file:
-                    if not line.strip():
-                        continue
-                    try:
-                        item = json.loads(line.strip())
-                        question_id = item.get('question_id')
-                        embedding = item.get('embedding')
-                        if question_id is not None and embedding is not None:
-                            self._save_embedding_to_cache(question_id, embedding)
-                    except Exception as parse_error:
-                        self.logger.log_error(parse_error, "迁移单条embedding记录失败")
-
-            backup_path = legacy_path + '.bak'
-            os.replace(legacy_path, backup_path)
-            self.logger.log_system_info(f"已将旧的embedding缓存迁移至SQLite，原文件备份为: {backup_path}")
-        except Exception as e:
-            self.logger.log_error(e, "迁移旧embedding缓存失败")
 
     def _load_embedding_cache(self):
         """加载embedding缓存"""

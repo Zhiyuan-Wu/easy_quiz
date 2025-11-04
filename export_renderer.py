@@ -19,6 +19,26 @@ from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
 import re
 from config import LATEX_COMPILE_CONFIG, LATEX_TEMPLATE_PATH, LATEX_CLASS_PATH, LATEX_OUTPUT_DIR
+
+TYPE_SEQUENCE = ["选择题", "填空题", "解答题"]
+DEFAULT_QUESTION_TYPE = "解答题"
+TYPE_SETTINGS = {
+    "选择题": {
+        "display": "选择题",
+        "score": 5,
+        "summary": "{display}，每题{score}分，共{total}分。每个题目的多个选项中只有一个是正确的。"
+    },
+    "填空题": {
+        "display": "填空题",
+        "score": 5,
+        "summary": "{display}，每题{score}分，共{total}分。请将答案填写在指定位置，不要写出推导过程。"
+    },
+    "解答题": {
+        "display": "解答题",
+        "score": 10,
+        "summary": "{display}，每题{score}分，共{total}分。请写出完整的解题思路和必要的理由。"
+    }
+}
 try:
     from latex2mathml.converter import convert as latex_to_mathml
     LATEX2MATHML_AVAILABLE = True
@@ -75,29 +95,43 @@ class ExportRenderer:
             template = f.read()
 
         copied_images: Dict[str, str] = {}
-        question_blocks: List[str] = []
-
-        for index, question in enumerate(questions, 1):
-            block = self._build_question_block(
-                question=question,
-                index=index,
-                mode=mode,
-                output_dir=output_dir,
-                copied_images=copied_images
-            )
-            if block:
-                question_blocks.append(block)
-
-        question_block_str = "\n\n".join(question_blocks)
-
+        grouped_questions = self._group_questions_by_type(questions)
+        question_sections: List[str] = []
         subject = "数学试卷"
-        section_summary = f"题目：共 {len(questions)} 小题。"
+        current_index = 1
+
+        for question_type, type_questions in grouped_questions:
+            if not type_questions:
+                continue
+
+            section_title = self._format_section_title(question_type, len(type_questions))
+            blocks: List[str] = []
+
+            for question in type_questions:
+                block = self._build_question_block(
+                    question=question,
+                    index=current_index,
+                    mode=mode,
+                    output_dir=output_dir,
+                    copied_images=copied_images
+                )
+                if block:
+                    blocks.append(block)
+                    current_index += 1
+
+            if blocks:
+                section_content = "\n\n".join(blocks)
+                question_sections.append(f"\\section{{{section_title}}}\n\n{section_content}")
+
+        if not question_sections:
+            question_sections.append("\\section{题目}\\textit{（暂无题目）}")
+
+        question_sections_str = "\n\n".join(question_sections)
 
         latex_content = (template
                          .replace('{{TITLE}}', title or '数学试卷')
                          .replace('{{SUBJECT}}', subject)
-                         .replace('{{SECTION_SUMMARY}}', section_summary)
-                         .replace('{{QUESTION_BLOCK}}', question_block_str))
+                         .replace('{{QUESTION_SECTIONS}}', question_sections_str))
 
         safe_title = re.sub(r'[^0-9A-Za-z\u4e00-\u9fa5_-]+', '_', title or 'exam')
         output_tex_path = os.path.join(output_dir, f"{safe_title}.tex")
@@ -125,18 +159,17 @@ class ExportRenderer:
     def render_docx(self, questions: List[Dict], mode: str, title: str) -> str:
         """
         生成Word格式试卷
-        
+
         Args:
             questions: 题目列表
             mode: 导出模式 (questions/with-answers)
             title: 试卷标题
-            
+
         Returns:
             文件路径
         """
         doc = Document()
 
-        # 设置页面边距
         sections = doc.sections
         for section in sections:
             section.top_margin = Inches(0.8)
@@ -144,26 +177,22 @@ class ExportRenderer:
             section.left_margin = Inches(0.9)
             section.right_margin = Inches(0.9)
 
-        # 标题
         title_text = title or '数学试卷'
         title_para = doc.add_heading(title_text, level=0)
         title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        # 日期
         current_date = datetime.now().strftime("%Y年%m月%d日")
         date_para = doc.add_paragraph(f"日期：{current_date}")
         date_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         doc.add_paragraph()
 
-        # 基本信息
         info_para = doc.add_paragraph()
         info_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
         info_run = info_para.add_run("姓名：__________    学号：__________    班级：__________")
         info_run.font.size = Pt(11)
         info_para.paragraph_format.space_after = Pt(12)
 
-        # 注意事项
         notice_heading = doc.add_paragraph("注意事项")
         notice_heading.style = 'Heading 2'
         notice_items = [
@@ -178,82 +207,88 @@ class ExportRenderer:
 
         doc.add_paragraph()
 
-        # 题目内容
-        for index, question in enumerate(questions, 1):
-            question_heading = doc.add_paragraph(f"第 {index} 题")
-            question_heading.style = 'Heading 3'
-            question_heading.paragraph_format.space_after = Pt(2)
+        grouped_questions = self._group_questions_by_type(questions)
+        current_index = 1
 
-            question_type_label = question.get('question_type') or '解答题'
-            type_para = doc.add_paragraph(f"题型：{question_type_label}")
-            if type_para.runs:
-                type_para.runs[0].italic = True
-            type_para.paragraph_format.space_after = Pt(6)
+        for question_type, type_questions in grouped_questions:
+            if not type_questions:
+                continue
 
-            latex_content = question.get('latex_content', '') or ''
-            readable_content = self._latex_to_readable(latex_content)
-            normalized_content = (readable_content or '').replace('• ', '\n• ')
-            content_lines = [line.strip() for line in normalized_content.split('\n') if line.strip()]
-            if not content_lines:
-                content_lines = ['（本题内容暂缺）']
+            summary_text = self._format_section_title(question_type, len(type_questions))
+            section_heading = doc.add_heading(summary_text, level=1)
+            section_heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            section_heading.paragraph_format.space_before = Pt(12)
+            section_heading.paragraph_format.space_after = Pt(6)
 
-            resolved_images = []
-            for img_path in question.get('image') or []:
-                resolved = self._resolve_docx_image_path(img_path)
-                if resolved:
-                    resolved_images.append(resolved)
+            for question in type_questions:
+                question_heading = doc.add_paragraph(f"第 {current_index} 题")
+                question_heading.style = 'Heading 3'
+                question_heading.paragraph_format.space_after = Pt(2)
 
-            if resolved_images:
-                table = doc.add_table(rows=1, cols=2)
-                table.alignment = WD_TABLE_ALIGNMENT.CENTER
-                table.autofit = False
-                table.columns[0].width = Inches(5.0)
-                table.columns[1].width = Inches(2.5)
-                self._remove_table_borders(table)
+                latex_content = question.get('latex_content', '') or ''
+                readable_content = self._latex_to_readable(latex_content)
+                normalized_content = (readable_content or '').replace('• ', '\n• ')
+                content_lines = [line.strip() for line in normalized_content.split('\n') if line.strip()]
+                if not content_lines:
+                    content_lines = ['（本题内容暂缺）']
 
-                left_cell = table.cell(0, 0)
-                right_cell = table.cell(0, 1)
-                left_cell.text = ''
-                right_cell.text = ''
-                left_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
-                right_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+                resolved_images = []
+                for img_path in question.get('image') or []:
+                    resolved = self._resolve_docx_image_path(img_path)
+                    if resolved:
+                        resolved_images.append(resolved)
 
-                self._append_text_lines(left_cell, content_lines)
-                self._add_images_to_cell(right_cell, resolved_images)
-            else:
-                self._append_text_lines(doc, content_lines)
+                if resolved_images:
+                    table = doc.add_table(rows=1, cols=2)
+                    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+                    table.autofit = False
+                    table.columns[0].width = Inches(5.0)
+                    table.columns[1].width = Inches(2.5)
+                    self._remove_table_borders(table)
 
-            reference_answer = question.get('reference_answer', '') or ''
-            if mode == 'with-answers' and reference_answer.strip():
-                answer_heading = doc.add_paragraph("参考解答")
-                if answer_heading.runs:
-                    answer_heading.runs[0].bold = True
-                answer_heading.paragraph_format.space_before = Pt(6)
-                answer_heading.paragraph_format.space_after = Pt(3)
+                    left_cell = table.cell(0, 0)
+                    right_cell = table.cell(0, 1)
+                    left_cell.text = ''
+                    right_cell.text = ''
+                    left_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+                    right_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
 
-                answer_table = doc.add_table(rows=1, cols=1)
-                answer_table.style = 'Table Grid'
-                answer_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-                answer_cell = answer_table.cell(0, 0)
-                answer_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
-                answer_cell.text = ''
+                    self._append_text_lines(left_cell, content_lines)
+                    self._add_images_to_cell(right_cell, resolved_images)
+                else:
+                    self._append_text_lines(doc, content_lines)
 
-                readable_answer = self._latex_to_readable(reference_answer)
-                normalized_answer = (readable_answer or '').replace('• ', '\n• ')
-                answer_lines = [line.strip() for line in normalized_answer.split('\n') if line.strip()]
-                if not answer_lines:
-                    answer_lines = ['（本题内容暂缺）']
-                self._append_text_lines(answer_cell, answer_lines)
+                reference_answer = question.get('reference_answer', '') or ''
+                if mode == 'with-answers' and reference_answer.strip():
+                    answer_heading = doc.add_paragraph("参考解答")
+                    if answer_heading.runs:
+                        answer_heading.runs[0].bold = True
+                    answer_heading.paragraph_format.space_before = Pt(6)
+                    answer_heading.paragraph_format.space_after = Pt(3)
 
-            doc.add_paragraph()
+                    answer_table = doc.add_table(rows=1, cols=1)
+                    answer_table.style = 'Table Grid'
+                    answer_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+                    answer_cell = answer_table.cell(0, 0)
+                    answer_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+                    answer_cell.text = ''
 
-        # 保存文件
+                    readable_answer = self._latex_to_readable(reference_answer)
+                    normalized_answer = (readable_answer or '').replace('• ', '\n• ')
+                    answer_lines = [line.strip() for line in normalized_answer.split('\n') if line.strip()]
+                    if not answer_lines:
+                        answer_lines = ['（本题内容暂缺）']
+                    self._append_text_lines(answer_cell, answer_lines)
+
+                doc.add_paragraph()
+                current_index += 1
+
         filename = f'paper_{uuid.uuid4().hex[:8]}.docx'
         file_path = os.path.join(self.upload_folder, filename)
         doc.save(file_path)
 
         return file_path
-    
+
     def render_pdf(self, questions: List[Dict], mode: str, title: str) -> str:
         """
         生成PDF格式试卷（通过LaTeX编译API）
@@ -318,8 +353,6 @@ class ExportRenderer:
         latex_body = question.get('latex_content', '') or ''
         latex_body = self._convert_enumerate_to_choices(latex_body)
 
-        question_type_label = question.get('question_type') or '解答题'
-        type_prefix = f"\\textbf{{题型：{question_type_label}}}\\\\[4pt]"
         question_body = latex_body.strip()
 
         images = question.get('image') or []
@@ -334,7 +367,6 @@ class ExportRenderer:
                 f"\\includegraphics[width=0.32\\textwidth]{{{name}}}" for name in image_filenames
             )
             question_text = question_body or '\\textit{（本题内容暂缺）}'
-            question_text = f"{type_prefix}{question_text}"
             latex_body = (
                 "\\textfigure[text-width=\\columnwidth,fig-pos=bottom-flushright]{%\n"
                 f"{question_text}\n"
@@ -344,9 +376,8 @@ class ExportRenderer:
             )
 
         if not latex_body.strip():
-            if not question_body:
-                question_body = '\\textit{（本题内容暂缺）}'
-            latex_body = f"{type_prefix}{question_body}"
+            latex_body = question_body or '\\textit{（本题内容暂缺）}'
+
 
         parts = [
             f"% Question {index}",
@@ -366,6 +397,31 @@ class ExportRenderer:
             ])
 
         return "\n".join(part for part in parts if part)
+
+    def _normalize_question_type(self, question: Dict) -> str:
+        q_type = (question.get('question_type') or '').strip()
+        if q_type not in TYPE_SETTINGS:
+            q_type = DEFAULT_QUESTION_TYPE
+        return q_type
+
+    def _group_questions_by_type(self, questions: List[Dict]) -> List[tuple]:
+        grouped = {question_type: [] for question_type in TYPE_SEQUENCE}
+        for question in questions:
+            normalized = self._normalize_question_type(question)
+            grouped.setdefault(normalized, [])
+            grouped[normalized].append(question)
+        return [(question_type, grouped.get(question_type, [])) for question_type in TYPE_SEQUENCE]
+
+    def _format_section_title(self, question_type: str, count: int) -> str:
+        settings = TYPE_SETTINGS.get(question_type, TYPE_SETTINGS[DEFAULT_QUESTION_TYPE])
+        score = settings.get('score', 0)
+        total = score * count if score else count
+        return settings['summary'].format(
+            display=settings.get('display', question_type),
+            score=score,
+            total=total,
+            count=count
+        )
 
     def _convert_enumerate_to_choices(self, content: str) -> str:
         if not content:
