@@ -53,14 +53,14 @@
             <button class="nav-tab active" data-tab="search">
                 <i class="fas fa-search"></i> 查询题目
             </button>
-            <button class="nav-tab" data-tab="add">
-                <i class="fas fa-plus"></i> 录入题目
-            </button>
             <button class="nav-tab" data-tab="ocr">
-                <i class="fas fa-file-upload"></i> 试卷解析
+                <i class="fas fa-file-upload"></i> 试卷扫描
             </button>
             <button class="nav-tab" data-tab="manage">
                 <i class="fas fa-list"></i> 题目管理
+            </button>
+            <button class="nav-tab" data-tab="students">
+                <i class="fas fa-user-graduate"></i> 学生管理
             </button>
         </nav>
 
@@ -96,103 +96,10 @@
             </div>
         </div>
 
-        <!-- 录入题目页面 -->
-        <div id="add-tab" class="tab-content">
-            <div class="card">
-                <h2><i class="fas fa-edit"></i> 录入新题目</h2>
-                
-                <form id="question-form">
-                    <div class="form-group">
-                        <label for="latex-content">
-                            <i class="fas fa-code"></i> 题目内容
-                        </label>
-                        <textarea id="latex-content" name="latex_content" rows="8" 
-                                placeholder="请输入题目内容（支持普通文本或LaTeX格式）..."></textarea>
-                        <div class="help-text">支持普通文本和LaTeX数学公式，系统会自动格式化为标准LaTeX格式</div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="source">
-                            <i class="fas fa-book"></i> 题目来源
-                        </label>
-                        <input type="text" id="source" name="source" 
-                               placeholder="如：2023年高考数学全国卷I">
-                    </div>
-
-                    <div class="form-group">
-                        <label>
-                            <i class="fas fa-tags"></i> 题目标签
-                        </label>
-                        <div class="tag-selector" id="tag-selector">
-                            <!-- 标签将通过JavaScript动态加载 -->
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="question-type">
-                            <i class="fas fa-list-check"></i> 题目类型
-                        </label>
-                        <select id="question-type" name="question_type" class="form-select">
-                            <option value="解答题" selected>解答题</option>
-                            <option value="选择题">选择题</option>
-                            <option value="填空题">填空题</option>
-                        </select>
-                        <div class="help-text">用于导出时的版面优化，自动打标将自动更新。</div>
-                    </div>
-
-                    <div class="form-group">
-                        <label>
-                            <i class="fas fa-eye"></i> 可见范围
-                        </label>
-                        <div class="visibility-selector">
-                            <label class="radio-item">
-                                <input type="radio" name="visibility" value="public" checked>
-                                <span><i class="fas fa-globe"></i> 所有人</span>
-                            </label>
-                            <label class="radio-item">
-                                <input type="radio" name="visibility" value="private">
-                                <span><i class="fas fa-lock"></i> 仅自己</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="image-upload">
-                            <i class="fas fa-image"></i> 题目图片
-                        </label>
-                        <div class="image-upload-container">
-                            <input type="file" id="image-upload" name="images" multiple accept="image/*" style="display: none;">
-                            <button type="button" id="upload-btn" class="btn btn-secondary">
-                                <i class="fas fa-upload"></i> 选择图片
-                            </button>
-                            <div id="image-preview" class="image-preview"></div>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="reference-answer">
-                            <i class="fas fa-lightbulb"></i> 参考解答
-                        </label>
-                        <textarea id="reference-answer" name="reference_answer" rows="6" 
-                                placeholder="请输入参考解答..."></textarea>
-                    </div>
-
-                    <div class="form-actions">
-                        <button type="button" id="auto-tag-btn" class="btn btn-secondary">
-                            <i class="fas fa-magic"></i> 自动打标、生成解答和LaTeX格式化
-                        </button>
-                        <button type="submit" class="btn btn-primary">
-                            <i class="fas fa-save"></i> 保存题目
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
         <!-- 试卷解析页面 -->
         <div id="ocr-tab" class="tab-content">
             <div class="card">
-                <h2><i class="fas fa-file-upload"></i> 试卷解析</h2>
+                <h2><i class="fas fa-file-upload"></i> 试卷扫描</h2>
                 
                 <div class="form-group" style="margin-bottom: 20px;">
                     <label>
@@ -270,6 +177,9 @@
                 <div class="manage-header">
                     <h2><i class="fas fa-list"></i> 题目管理</h2>
                     <div class="manage-controls">
+                        <button id="open-add-question-modal" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> 增加题目
+                        </button>
                         <button id="refresh-btn" class="btn btn-secondary">
                             <i class="fas fa-refresh"></i> 刷新
                         </button>
@@ -292,6 +202,305 @@
                         下一页 <i class="fas fa-chevron-right"></i>
                     </button>
                 </div>
+            </div>
+        </div>
+
+        <!-- 学生管理页面 -->
+        <div id="students-tab" class="tab-content">
+            <div class="card">
+                <div class="students-header">
+                    <h2><i class="fas fa-user-graduate"></i> 学生管理</h2>
+                    <div class="students-controls">
+                        <button id="reload-students-btn" class="btn btn-secondary">
+                            <i class="fas fa-refresh"></i> 刷新
+                        </button>
+                        <button id="add-student-btn" class="btn btn-primary">
+                            <i class="fas fa-user-plus"></i> 添加学生
+                        </button>
+                    </div>
+                </div>
+                <div class="students-table-wrapper" id="students-table-wrapper">
+                    <table class="students-table">
+                        <thead>
+                            <tr>
+                                <th>学号</th>
+                                <th>姓名</th>
+                                <th>更新时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="students-table-body">
+                        </tbody>
+                    </table>
+                    <div class="students-empty" id="students-empty">
+                        <i class="fas fa-users-slash"></i>
+                        <p>暂无学生数据，请先添加学生。</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新增题目模态框 -->
+    <div id="add-question-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-plus"></i> 增加题目</h3>
+                <button class="modal-close" data-close="add-question-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="question-form">
+                    <div class="form-group">
+                        <label for="latex-content">
+                            <i class="fas fa-code"></i> 题目内容
+                        </label>
+                        <textarea id="latex-content" name="latex_content" rows="8" 
+                                placeholder="请输入题目内容（支持普通文本或LaTeX格式）..."></textarea>
+                        <div class="help-text">支持普通文本和LaTeX数学公式，系统会自动格式化为标准LaTeX格式</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="source">
+                            <i class="fas fa-book"></i> 题目来源
+                        </label>
+                        <input type="text" id="source" name="source" 
+                               placeholder="如：2023年高考数学全国卷I">
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <i class="fas fa-tags"></i> 题目标签
+                        </label>
+                        <div class="tag-selector" id="tag-selector">
+                            <!-- 标签将通过JavaScript动态加载 -->
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="question-type">
+                            <i class="fas fa-list-check"></i> 题目类型
+                        </label>
+                        <div class="custom-select-wrapper">
+                            <div class="custom-select" id="question-type-select">
+                                <div class="custom-select-trigger">
+                                    <span class="custom-select-value">解答题</span>
+                                    <i class="fas fa-chevron-down"></i>
+                                </div>
+                                <div class="custom-select-options">
+                                    <div class="custom-select-option" data-value="解答题">解答题</div>
+                                    <div class="custom-select-option" data-value="选择题">选择题</div>
+                                    <div class="custom-select-option" data-value="填空题">填空题</div>
+                                </div>
+                            </div>
+                        </div>
+                        <input type="hidden" id="question-type" name="question_type" value="解答题">
+                        <div class="help-text">用于导出时的版面优化，自动打标将自动更新。</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <i class="fas fa-eye"></i> 可见范围
+                        </label>
+                        <div class="visibility-selector">
+                            <label class="radio-item">
+                                <input type="radio" name="visibility" value="public" checked>
+                                <span><i class="fas fa-globe"></i> 所有人</span>
+                            </label>
+                            <label class="radio-item">
+                                <input type="radio" name="visibility" value="private">
+                                <span><i class="fas fa-lock"></i> 仅自己</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="image-upload">
+                            <i class="fas fa-image"></i> 题目图片
+                        </label>
+                        <div class="image-upload-container">
+                            <input type="file" id="image-upload" name="images" multiple accept="image/*" style="display: none;">
+                            <button type="button" id="upload-btn" class="btn btn-secondary">
+                                <i class="fas fa-upload"></i> 选择图片
+                            </button>
+                            <div id="image-preview" class="image-preview"></div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="reference-answer">
+                            <i class="fas fa-lightbulb"></i> 参考解答
+                        </label>
+                        <textarea id="reference-answer" name="reference_answer" rows="6" 
+                                placeholder="请输入参考解答..."></textarea>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="button" id="auto-tag-btn" class="btn btn-secondary">
+                            <i class="fas fa-magic"></i> 自动打标、生成解答和LaTeX格式化
+                        </button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i> 保存题目
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加学生模态框 -->
+    <div id="add-student-modal" class="modal">
+        <div class="modal-content small-modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-user-plus"></i> 添加学生</h3>
+                <button class="modal-close" data-close="add-student-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="add-student-form">
+                    <div class="form-group">
+                        <label for="student-id-input">
+                            <i class="fas fa-id-card"></i> 学号
+                        </label>
+                        <input type="text" id="student-id-input" required placeholder="请输入学号">
+                    </div>
+                    <div class="form-group">
+                        <label for="student-name-input">
+                            <i class="fas fa-user"></i> 姓名
+                        </label>
+                        <input type="text" id="student-name-input" required placeholder="请输入姓名">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-close="add-student-modal">取消</button>
+                <button id="submit-student-btn" class="btn btn-primary">提交</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 提交作业模态框 -->
+    <div id="homework-modal" class="modal">
+        <div class="modal-content homework-modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-file-signature"></i> 提交作业</h3>
+                <button class="modal-close" data-close="homework-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="homework-meta">
+                    <p>学生：<span id="homework-student-name">-</span></p>
+                    <p>学号：<span id="homework-student-id">-</span></p>
+                </div>
+                <div class="form-group">
+                    <label for="homework-export-select">
+                        <i class="fas fa-file-circle-check"></i> 关联试卷
+                    </label>
+                    <div class="custom-select-wrapper">
+                        <div class="custom-select" id="homework-export-select">
+                            <div class="custom-select-trigger">
+                                <span class="custom-select-value">请选择试卷</span>
+                                <i class="fas fa-chevron-down"></i>
+                            </div>
+                            <div class="custom-select-options" id="homework-export-options"></div>
+                        </div>
+                    </div>
+                    <div class="help-text">下拉列表显示最近导出的试卷。</div>
+                </div>
+                <div class="form-group">
+                    <label for="homework-file-input">
+                        <i class="fas fa-image"></i> 作业图片
+                    </label>
+                    <div class="homework-upload-area">
+                        <div class="homework-upload-zone" id="homework-upload-zone">
+                            <div class="upload-icon">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                            </div>
+                            <h4>点击或拖拽上传作业图片</h4>
+                            <p>支持 PNG、JPG、JPEG 格式，最大 16MB</p>
+                            <input type="file" id="homework-file-input" accept="image/*" style="display: none;">
+                            <button type="button" id="homework-upload-btn" class="btn btn-primary">
+                                <i class="fas fa-upload"></i> 选择文件
+                            </button>
+                        </div>
+                        <div id="homework-preview" class="homework-preview" style="display: none;">
+                            <div class="preview-header">
+                                <h4><i class="fas fa-image"></i> 作业预览</h4>
+                                <button type="button" id="remove-homework-btn" class="btn btn-danger btn-sm">
+                                    <i class="fas fa-times"></i> 移除
+                                </button>
+                            </div>
+                            <div class="preview-image"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="homework-actions">
+                    <button id="homework-parse-btn" class="btn btn-primary">
+                        <i class="fas fa-robot"></i> 作业解析
+                    </button>
+                </div>
+                <div id="homework-results" class="homework-results hidden">
+                    <div class="homework-results-header">
+                        <h4><i class="fas fa-list-alt"></i> 解析结果</h4>
+                        <button id="homework-save-btn" class="btn btn-primary">
+                            <i class="fas fa-save"></i> 保存作业
+                        </button>
+                    </div>
+                    <div id="homework-results-list" class="homework-cards"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 做题历史模态框 -->
+    <div id="history-modal" class="modal">
+        <div class="modal-content medium-modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-clock-rotate-left"></i> 做题历史</h3>
+                <button class="modal-close" data-close="history-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="history-content" class="history-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 学习报告模态框 -->
+    <div id="report-modal" class="modal">
+        <div class="modal-content report-modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-chart-line"></i> 学习报告</h3>
+                <div class="report-actions">
+                    <button id="refresh-report-btn" class="btn btn-secondary">
+                        <i class="fas fa-arrows-rotate"></i> 重新生成
+                    </button>
+                </div>
+                <button class="modal-close" data-close="report-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="report-section">
+                    <h4><i class="fas fa-map"></i> 错题主要分布</h4>
+                    <p id="report-distribution" class="report-text">暂无数据。</p>
+                </div>
+                <div class="report-section">
+                    <h4><i class="fas fa-lightbulb"></i> 需要补强的知识点</h4>
+                    <ul id="report-knowledge-list" class="report-knowledge-list"></ul>
+                </div>
+                <div class="report-section">
+                    <h4><i class="fas fa-list-check"></i> 学习计划顺序</h4>
+                    <ol id="report-plan-list" class="report-plan-list"></ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI 推荐模态框 -->
+    <div id="recommendation-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-wand-magic-sparkles"></i> AI 题目推荐</h3>
+                <button class="modal-close" data-close="recommendation-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="recommendation-reasons" id="recommendation-reasons"></div>
+                <div id="recommendation-list" class="recommendation-list"></div>
             </div>
         </div>
     </div>

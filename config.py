@@ -6,6 +6,8 @@
 # 数据库配置
 DATABASE_PATH = "question_database.db"
 SYSTEM_DATABASE_PATH = "system.db"
+STUDENT_DATABASE_PATH = "data/students.db"
+HOMEWORK_DATABASE_PATH = "data/homework_results.db"
 
 # Session配置
 SECRET_KEY = "your-secret-key-change-this-in-production"
@@ -71,3 +73,10 @@ LATEX_COMPILE_CONFIG = {
 LATEX_TEMPLATE_PATH = "resources/exam_template.tex"
 LATEX_CLASS_PATH = "resources/exam-zh.cls"
 LATEX_OUTPUT_DIR = "latex_results"
+
+# 学生学情分析配置
+ANALYTICS_WINDOW_DAYS = 30  # 最近一个月窗口，可调整
+REPORT_MAX_ITEMS = 20  # 生成报告时的题目上限
+AI_RECOMMENDATION_LIMIT = 6  # 推荐题目数量
+AVERAGE_CACHE_TTL_SECONDS = 6 * 3600  # 平均分缓存有效期，防止频繁计算（可选）
+HOMEWORK_UPLOAD_DIR = "uploads/homework_submissions"
