@@ -160,6 +160,7 @@ def add_question():
         source = data.get('source', '')
         image = data.get('image', [])
         visibility = data.get('visibility', 'public')  # 新增：可见范围，默认所有人
+        question_type = data.get('question_type', '解答题')
         
         # 添加题目
         question_id = question_manager.add_question(
@@ -169,7 +170,8 @@ def add_question():
             source=source,
             image=image,
             user_id=session['user_id'],
-            visibility=visibility
+            visibility=visibility,
+            question_type=question_type
         )
         
         return jsonify({
@@ -190,6 +192,7 @@ def update_question(question_id):
         data = request.get_json() or {}
         latex_content = (data.get('latex_content') or '').strip()
         reference_answer = data.get('reference_answer', '')
+        question_type = data.get('question_type')
 
         if not latex_content:
             return jsonify({'success': False, 'message': '题目内容不能为空'}), 400
@@ -206,7 +209,8 @@ def update_question(question_id):
             question_id=question_id,
             latex_content=latex_content,
             reference_answer=reference_answer,
-            current_user_id=current_user_id
+            current_user_id=current_user_id,
+            question_type=question_type
         )
 
         return jsonify({
@@ -241,7 +245,7 @@ def auto_tag_question():
         logger.log_user_action(user_id, "自动打标和LaTeX格式化", f"内容长度: {len(content)}")
         
         # 自动打标、生成解答和LaTeX格式化
-        tags, answer, latex_content = question_manager.auto_tag_and_answer(content, source)
+        tags, answer, latex_content, question_type = question_manager.auto_tag_and_answer(content, source)
         
         duration = time.time() - start_time
         logger.log_performance("自动打标API", duration, f"用户ID: {user_id}")
@@ -250,7 +254,8 @@ def auto_tag_question():
             'success': True,
             'tags': tags,
             'answer': answer,
-            'latex_content': latex_content
+            'latex_content': latex_content,
+            'question_type': question_type
         })
         
     except Exception as e:

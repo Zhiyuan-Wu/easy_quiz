@@ -129,6 +129,18 @@
                     </div>
 
                     <div class="form-group">
+                        <label for="question-type">
+                            <i class="fas fa-list-check"></i> 题目类型
+                        </label>
+                        <select id="question-type" name="question_type" class="form-select">
+                            <option value="解答题" selected>解答题</option>
+                            <option value="选择题">选择题</option>
+                            <option value="填空题">填空题</option>
+                        </select>
+                        <div class="help-text">用于导出时的版面优化，自动打标将自动更新。</div>
+                    </div>
+
+                    <div class="form-group">
                         <label>
                             <i class="fas fa-eye"></i> 可见范围
                         </label>
@@ -297,6 +309,7 @@
                 </div>
                 <div class="modal-section">
                     <h4><i class="fas fa-book-open"></i> 题目内容</h4>
+                    <div id="modal-question-type" class="modal-meta"></div>
                     <div id="modal-question-content" class="modal-richtext"></div>
                     <textarea id="modal-question-editor" class="modal-editor hidden" spellcheck="false"></textarea>
                 </div>
@@ -364,16 +377,16 @@
                             <label>导出格式</label>
                             <div class="radio-group">
                                 <label class="radio-item">
-                                    <input type="radio" name="export-format" value="latex" checked>
-                                    <span>LaTeX</span>
+                                    <input type="radio" name="export-format" value="pdf" checked>
+                                    <span>PDF</span>
                                 </label>
                                 <label class="radio-item">
                                     <input type="radio" name="export-format" value="docx">
-                                    <span>Word (DOCX)</span>
+                                    <span>Word</span>
                                 </label>
                                 <label class="radio-item">
-                                    <input type="radio" name="export-format" value="pdf">
-                                    <span>PDF</span>
+                                    <input type="radio" name="export-format" value="latex">
+                                    <span>LaTeX</span>
                                 </label>
                             </div>
                         </div>

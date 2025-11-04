@@ -56,7 +56,7 @@ EMBEDDING_CONFIG = {
 }
 
 # Embedding缓存配置
-EMBEDDING_CACHE_PATH = "data/embeddings_cache.jsonl"
+EMBEDDING_CACHE_DB_PATH = "data/embeddings_cache.db"
 
 # LaTeX编译服务配置
 LATEX_COMPILE_CONFIG = {

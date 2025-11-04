@@ -12,13 +12,32 @@ import os
 import threading
 import numpy as np
 from typing import List, Dict, Optional, Tuple
-from config import DATABASE_PATH, LLM_CONFIG, MAX_QUESTION_LENGTH, MAX_ANSWER_LENGTH, EMBEDDING_CACHE_PATH
+from config import (
+    DATABASE_PATH,
+    LLM_CONFIG,
+    MAX_QUESTION_LENGTH,
+    MAX_ANSWER_LENGTH,
+    EMBEDDING_CACHE_DB_PATH,
+)
 from openai import OpenAI
 from logger import get_logger
 from json_repair import repair_json
 from ocr_client import DeepSeekOCRClient
 
 import faiss
+
+QUESTION_TYPE_CHOICES = {"选择题", "填空题", "解答题"}
+DEFAULT_QUESTION_TYPE = "解答题"
+
+
+def _sanitize_question_type(value: Optional[str]) -> str:
+    if isinstance(value, str):
+        question_type = value.strip() or DEFAULT_QUESTION_TYPE
+    else:
+        question_type = DEFAULT_QUESTION_TYPE
+    if question_type not in QUESTION_TYPE_CHOICES:
+        question_type = DEFAULT_QUESTION_TYPE
+    return question_type
 
 class QuestionManager:
     """高考题目管理器类"""
@@ -39,12 +58,12 @@ class QuestionManager:
         self.init_database()
         
         # Embedding缓存文件路径（使用配置）
-        cache_dir = os.path.dirname(EMBEDDING_CACHE_PATH)
+        cache_dir = os.path.dirname(EMBEDDING_CACHE_DB_PATH)
         if cache_dir and not os.path.exists(cache_dir):
             os.makedirs(cache_dir, exist_ok=True)
-        self.embedding_cache_path = EMBEDDING_CACHE_PATH
-        self.embedding_cache = {}  # question_id -> embedding vector
-        self._load_embedding_cache()
+        self.embedding_cache_path = EMBEDDING_CACHE_DB_PATH
+        self._ensure_embedding_store()
+        self.embedding_cache = self._load_embedding_cache()  # question_id -> embedding vector
         
         # 异步任务锁和正在处理的question_id集合
         self._async_task_lock = threading.Lock()
@@ -66,6 +85,7 @@ class QuestionManager:
                 image TEXT,  -- JSON格式存储图片路径列表
                 user_id INTEGER,  -- 上传用户ID
                 visibility TEXT DEFAULT 'public',  -- 可见范围: public(所有人), private(仅自己)
+                question_type TEXT DEFAULT '解答题',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -80,6 +100,8 @@ class QuestionManager:
         
         if 'visibility' not in columns:
             cursor.execute("ALTER TABLE questions ADD COLUMN visibility TEXT DEFAULT 'public'")
+        if 'question_type' not in columns:
+            cursor.execute("ALTER TABLE questions ADD COLUMN question_type TEXT DEFAULT '解答题'")
         
         # 创建索引
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tags ON questions(tags)')
@@ -90,53 +112,64 @@ class QuestionManager:
         conn.commit()
         conn.close()
     
+    def _ensure_embedding_store(self):
+        """确保embedding缓存存储结构存在"""
+        conn = sqlite3.connect(self.embedding_cache_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS embeddings (
+                    question_id INTEGER PRIMARY KEY,
+                    embedding TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                '''
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def _load_embedding_cache(self):
         """加载embedding缓存"""
-        if os.path.exists(self.embedding_cache_path):
-            try:
-                with open(self.embedding_cache_path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        if line.strip():
-                            item = json.loads(line.strip())
-                            question_id = item['question_id']
-                            embedding = item['embedding']
-                            self.embedding_cache[question_id] = embedding
-            except Exception as e:
-                self.logger.log_error(e, "加载embedding缓存失败")
-                self.embedding_cache = {}
+        cache = {}
+        try:
+            conn = sqlite3.connect(self.embedding_cache_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT question_id, embedding FROM embeddings')
+            rows = cursor.fetchall()
+            for question_id, embedding_text in rows:
+                try:
+                    cache[question_id] = json.loads(embedding_text)
+                except Exception as parse_error:
+                    self.logger.log_error(parse_error, f"解析embedding失败 - question_id: {question_id}")
+            conn.close()
+        except Exception as e:
+            self.logger.log_error(e, "加载embedding缓存失败")
+        return cache
     
     def _save_embedding_to_cache(self, question_id: int, embedding: List[float]):
-        """追加保存embedding到缓存文件"""
+        """保存或更新embedding到缓存存储"""
         try:
-            with open(self.embedding_cache_path, 'a', encoding='utf-8') as f:
-                item = {
-                    'question_id': question_id,
-                    'embedding': embedding
-                }
-                f.write(json.dumps(item, ensure_ascii=False) + '\n')
-            
-            # 更新内存缓存
+            conn = sqlite3.connect(self.embedding_cache_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                INSERT INTO embeddings (question_id, embedding, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(question_id) DO UPDATE SET
+                    embedding = excluded.embedding,
+                    updated_at = CURRENT_TIMESTAMP
+                ''',
+                (question_id, json.dumps(embedding, ensure_ascii=False))
+            )
+            conn.commit()
+            conn.close()
+
             self.embedding_cache[question_id] = embedding
         except Exception as e:
             self.logger.log_error(e, f"保存embedding缓存失败 - question_id: {question_id}")
 
-    def _rewrite_embedding_cache(self):
-        """将当前内存中的embedding缓存写回文件"""
-        try:
-            with open(self.embedding_cache_path, 'w', encoding='utf-8') as f:
-                for question_id, embedding in self.embedding_cache.items():
-                    f.write(json.dumps({
-                        'question_id': question_id,
-                        'embedding': embedding
-                    }, ensure_ascii=False) + '\n')
-        except Exception as e:
-            self.logger.log_error(e, "重写embedding缓存失败")
-
-    def _update_embedding_cache(self, question_id: int, embedding: List[float]):
-        """更新指定题目的embedding缓存"""
-        self.embedding_cache[question_id] = embedding
-        self._rewrite_embedding_cache()
-    
     def _get_detailed_instruct(self, task_description: str, query: str) -> str:
         """获取带指令的查询文本"""
         return f'Instruct: {task_description}\nQuery:{query}'
@@ -222,7 +255,7 @@ class QuestionManager:
     def add_question(self, latex_content: str, tags: List[str] = None, 
                     reference_answer: str = None, source: str = None, 
                     image: List[str] = None, user_id: int = None, 
-                    visibility: str = 'public') -> int:
+                    visibility: str = 'public', question_type: str = '解答题') -> int:
         """
         添加题目到数据库
         
@@ -251,16 +284,22 @@ class QuestionManager:
         image = image or []
         image_json = json.dumps(image, ensure_ascii=False)
         
-        self.logger.log_database_operation("INSERT", "questions", details=f"用户ID: {user_id}, 标签: {tags}, 来源: {source}")
+        question_type = _sanitize_question_type(question_type)
+
+        self.logger.log_database_operation(
+            "INSERT",
+            "questions",
+            details=f"用户ID: {user_id}, 标签: {tags}, 来源: {source}, 题目类型: {question_type}"
+        )
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
             cursor.execute('''
-                INSERT INTO questions (latex_content, tags, reference_answer, source, image, user_id, visibility)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (latex_content, tags_json, reference_answer, source, image_json, user_id, visibility))
+                INSERT INTO questions (latex_content, tags, reference_answer, source, image, user_id, visibility, question_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (latex_content, tags_json, reference_answer, source, image_json, user_id, visibility, question_type))
             
             question_id = cursor.lastrowid
             conn.commit()
@@ -279,7 +318,8 @@ class QuestionManager:
             conn.close()
     
     def update_question(self, question_id: int, latex_content: str,
-                        reference_answer: Optional[str], current_user_id: int) -> Optional[Dict]:
+                        reference_answer: Optional[str], current_user_id: int,
+                        question_type: Optional[str] = None) -> Optional[Dict]:
         """更新题目信息并刷新对应的embedding"""
         if not latex_content or not latex_content.strip():
             raise ValueError("题目内容不能为空")
@@ -298,11 +338,26 @@ class QuestionManager:
             if owner_id != current_user_id:
                 raise PermissionError('无权修改该题目')
 
-            cursor.execute('''
+            normalized_type = None
+            if question_type is not None:
+                normalized_type = _sanitize_question_type(question_type)
+
+            set_clauses = ["latex_content = ?", "reference_answer = ?", "updated_at = CURRENT_TIMESTAMP"]
+            params = [latex_content, reference_answer]
+            if normalized_type is not None:
+                set_clauses.insert(2, "question_type = ?")
+                params.append(normalized_type)
+
+            set_clause_sql = ', '.join(set_clauses)
+            params.extend([question_id, current_user_id])
+
+            cursor.execute(
+                f'''
                 UPDATE questions
-                SET latex_content = ?, reference_answer = ?, updated_at = CURRENT_TIMESTAMP
+                SET {set_clause_sql}
                 WHERE id = ? AND user_id = ?
-            ''', (latex_content, reference_answer, question_id, current_user_id))
+                ''', params
+            )
             conn.commit()
         except Exception as e:
             conn.rollback()
@@ -316,7 +371,7 @@ class QuestionManager:
                 question_text = self._get_question_text(updated_question)
                 embeddings = self.ocr_client.get_embeddings([question_text])
                 if embeddings and len(embeddings) > 0:
-                    self._update_embedding_cache(question_id, embeddings[0])
+                    self._save_embedding_to_cache(question_id, embeddings[0])
             except Exception as e:
                 self.logger.log_error(e, f"更新题目embedding失败 - question_id: {question_id}")
 
@@ -391,7 +446,7 @@ class QuestionManager:
         return None
     
     
-    def auto_tag_and_answer(self, content: str, source: str = None) -> Tuple[List[str], str, str]:
+    def auto_tag_and_answer(self, content: str, source: str = None) -> Tuple[List[str], str, str, str]:
         """
         使用大语言模型自动打标、生成参考解答并格式化为LaTeX
         
@@ -400,7 +455,7 @@ class QuestionManager:
             source: 题目来源
             
         Returns:
-            (标签列表, 参考解答, LaTeX格式的题目内容)
+            (标签列表, 参考解答, LaTeX格式的题目内容, 题目类型)
         """
         start_time = time.time()
         
@@ -418,6 +473,7 @@ class QuestionManager:
 1. 将题目内容格式化为标准的LaTeX格式，确保数学公式、符号、格式都正确
 2. 请给这个题目所涉及的知识点打上几个标签，可以参考以下标签：{', '.join(available_tags) if available_tags else '立体几何, 导数题, 极值点偏移, 三角函数, 数列, 概率统计, 解析几何, 函数与方程, 不等式, 向量, 复数, 算法与程序框图'}
 3. 生成详细的参考解答
+4. 判断题目类型并返回 question_type 字段，可选值仅限 "选择题"、"填空题"、"解答题"，若无法确定请返回 "解答题"
 
 题目内容：
 {content}
@@ -426,7 +482,8 @@ class QuestionManager:
 {{
     "latex_content": "LaTeX格式的题目内容",
     "tags": ["标签1", "标签2"],
-    "answer": "详细的参考解答，包含解题步骤和最终答案"
+    "answer": "详细的参考解答，包含解题步骤和最终答案",
+    "question_type": "解答题"
 }}
 """
             
@@ -451,6 +508,12 @@ class QuestionManager:
                 latex_content = result.get('latex_content', content)
                 tags = result.get('tags', [])
                 answer = result.get('answer', '')
+                question_type = result.get('question_type', '解答题')
+                if not isinstance(question_type, str):
+                    question_type = '解答题'
+                question_type = question_type.strip() or '解答题'
+                if question_type not in QUESTION_TYPE_CHOICES:
+                    question_type = '解答题'
                 
                 # 验证标签并添加到数据库
                 valid_tags = []
@@ -466,7 +529,7 @@ class QuestionManager:
                 duration = time.time() - start_time
                 self.logger.log_performance("自动打标和LaTeX格式化", duration, f"标签数量: {len(valid_tags)}")
                 
-                return valid_tags, answer, latex_content
+                return valid_tags, answer, latex_content, question_type
                 
             except json.JSONDecodeError as e:
                 self.logger.log_error(e, "JSON解析失败 - 自动打标")
@@ -474,7 +537,7 @@ class QuestionManager:
                 
         except Exception as e:
             self.logger.log_error(e, "自动打标失败")
-            return [], "自动生成解答失败，请手动输入", content
+            return [], "自动生成解答失败，请手动输入", content, '解答题'
 
     def generate_question_variant(self, question: Dict) -> Dict:
         """基于原题生成微调后的题目变体"""
@@ -591,7 +654,8 @@ class QuestionManager:
 3. 将题目内容转换为LaTeX格式，选择题选项优先使用enumerate环境。
 4. 识别题目中引用的图片（如果有），从可用图片列表中选择合适的图片，严格返回可用的图片文件列表中的文件名，不要新增前缀或移除后缀。
 5. 为每道题目生成其所考察的知识点标签并生成解答，标签可以参考：{', '.join(available_tags) if available_tags else '立体几何, 导数题, 极值点偏移, 三角函数, 数列, 概率统计, 解析几何, 函数与方程, 不等式, 向量, 复数, 算法与程序框图'}
-6. 返回JSON格式，包含题目列表
+6. 判断每道题目的类型并返回 question_type 字段，可选值仅限 "选择题"、"填空题"、"解答题"，若无法确定请返回 "解答题"
+7. 返回JSON格式，包含题目列表
 
 请按以下JSON格式回复：
 {{
@@ -600,7 +664,8 @@ class QuestionManager:
             "question": "LaTeX格式的题目内容",
             "image": ["图片路径1", "图片路径2"],
             "tags": ["标签1", "标签2"],
-            "answer": "详细的参考解答"
+            "answer": "详细的参考解答",
+            "question_type": "解答题"
         }}
     ]
 }}
@@ -651,11 +716,14 @@ class QuestionManager:
                                 self.logger.log_warning(f"图片文件 {img_filename} 在映射中未找到", "试卷解析")
                     
                     # 确保必要字段存在
+                    normalized_question_type = _sanitize_question_type(question.get('question_type'))
+
                     validated_question = {
                         'question': question.get('question', ''),
                         'image': mapped_images,  # 使用映射后的本地路径
                         'tags': question.get('tags', []),
-                        'answer': question.get('answer', '')
+                        'answer': question.get('answer', ''),
+                        'question_type': normalized_question_type
                     }
                     
                     if not validated_question['question']:
@@ -962,6 +1030,7 @@ class QuestionManager:
             'image': json.loads(get_column_value('image', '[]')) if get_column_value('image') else [],
             'user_id': get_column_value('user_id'),
             'visibility': get_column_value('visibility', 'public'),
+            'question_type': get_column_value('question_type', '解答题'),
             'created_at': get_column_value('created_at'),
             'updated_at': get_column_value('updated_at')
         }

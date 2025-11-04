@@ -640,6 +640,18 @@ textarea {
     margin-right: 10px;
 }
 
+.question-type-badge {
+    display: inline-block;
+    margin-left: 4px;
+    margin-right: 8px;
+    padding: 2px 8px;
+    border: 1px solid var(--color-primary);
+    border-radius: 999px;
+    font-size: 0.75rem;
+    color: var(--color-primary);
+    background: rgba(20, 118, 255, 0.08);
+}
+
 .question-tags {
     display: flex;
     flex-wrap: wrap;
@@ -889,6 +901,12 @@ textarea {
     font-size: 0.85rem;
     color: var(--color-muted);
     margin-top: 6px;
+}
+
+.modal-meta {
+    font-size: 0.9rem;
+    color: var(--color-muted);
+    margin-bottom: 8px;
 }
 
 .modal-hint {

@@ -7,3 +7,4 @@ json-repair
 latex2mathml
 numpy
 faiss-cpu
+pytest

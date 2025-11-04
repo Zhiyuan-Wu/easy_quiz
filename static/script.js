@@ -20,6 +20,7 @@ const tagFilter = document.getElementById('tag-filter');
 const searchResults = document.getElementById('search-results');
 const questionList = document.getElementById('question-list');
 const refreshBtn = document.getElementById('refresh-btn');
+const questionTypeSelect = document.getElementById('question-type');
 const prevPageBtn = document.getElementById('prev-page');
 const nextPageBtn = document.getElementById('next-page');
 const pageInfo = document.getElementById('page-info');
@@ -36,6 +37,7 @@ const modalQuestionTags = document.getElementById('modal-question-tags');
 const modalQuestionAnswer = document.getElementById('modal-question-answer');
 const modalQuestionEditor = document.getElementById('modal-question-editor');
 const modalAnswerEditor = document.getElementById('modal-answer-editor');
+const modalQuestionType = document.getElementById('modal-question-type');
 const editQuestionBtn = document.getElementById('edit-question-btn');
 const saveQuestionBtn = document.getElementById('save-question-btn');
 const cancelEditBtn = document.getElementById('cancel-edit-btn');
@@ -50,7 +52,8 @@ const modalState = {
     aiSuggested: false,
     draft: {
         latex_content: '',
-        reference_answer: ''
+        reference_answer: '',
+        question_type: '解答题'
     }
 };
 
@@ -380,13 +383,16 @@ async function handleFormSubmit(e) {
     const selectedTags = getSelectedTags(tagSelector);
     const visibility = document.querySelector('input[name="visibility"]:checked').value;
     
+    const questionTypeValue = questionTypeSelect ? questionTypeSelect.value : '解答题';
+
     const questionData = {
         latex_content: formData.get('latex_content'),
         tags: selectedTags,
         reference_answer: formData.get('reference_answer'),
         source: formData.get('source'),
         image: uploadedImages,
-        visibility: visibility
+        visibility: visibility,
+        question_type: questionTypeValue
     };
     
     if (!questionData.latex_content.trim()) {
@@ -412,6 +418,9 @@ async function handleFormSubmit(e) {
             questionForm.reset();
             uploadedImages = [];
             imagePreview.innerHTML = '';
+            if (questionTypeSelect) {
+                questionTypeSelect.value = '解答题';
+            }
             // 清除标签选择
             tagSelector.querySelectorAll('.tag-item').forEach(tag => {
                 tag.classList.remove('selected');
@@ -478,6 +487,12 @@ async function handleAutoTag() {
             
             // 设置参考解答
             document.getElementById('reference-answer').value = result.answer;
+
+            if (questionTypeSelect) {
+                const allowedTypes = ['选择题', '填空题', '解答题'];
+                const modelType = (result.question_type || '').trim();
+                questionTypeSelect.value = allowedTypes.includes(modelType) ? modelType : '解答题';
+            }
             
             showMessage('自动打标和LaTeX格式化完成！', 'success');
         } else {
@@ -571,6 +586,7 @@ function renderSearchResults() {
                 <div class="question-meta-row">
                     <div class="question-left">
                         <span class="question-id">#${question.id}</span>
+                        <span class="question-type-badge">${question.question_type || '解答题'}</span>
                         <div class="question-tags">
                             ${question.tags.map(tag => `<span class="question-tag">${tag}</span>`).join('')}
                         </div>
@@ -634,6 +650,7 @@ function renderQuestionList() {
                 <div class="question-meta-row">
                     <div class="question-left">
                         <span class="question-id">#${question.id}</span>
+                        <span class="question-type-badge">${question.question_type || '解答题'}</span>
                         <div class="question-tags">
                             ${question.tags.map(tag => `<span class="question-tag">${tag}</span>`).join('')}
                         </div>
@@ -725,7 +742,8 @@ function openQuestionModal(question) {
     modalState.isEditing = false;
     modalState.draft = {
         latex_content: question.latex_content || '',
-        reference_answer: question.reference_answer || ''
+        reference_answer: question.reference_answer || '',
+        question_type: question.question_type || '解答题'
     };
 
     renderModalContent(question);
@@ -748,11 +766,19 @@ function renderModalContent(question) {
         if (modalAnswerEditor) {
             modalAnswerEditor.value = '';
         }
+        if (modalQuestionType) {
+            modalQuestionType.textContent = '';
+        }
         return;
     }
 
     const latexContent = question.latex_content || '';
     let contentHtml = renderMathContent(latexContent);
+
+    const questionTypeLabel = question.question_type || '解答题';
+    if (modalQuestionType) {
+        modalQuestionType.textContent = `题型：${questionTypeLabel}`;
+    }
 
     if (question.image && question.image.length > 0) {
         const imageScale = APP_CONFIG.imageDisplay.defaultScale;
@@ -820,7 +846,8 @@ function enterEditMode(options = {}) {
     if (!preserveDraft) {
         modalState.draft = {
             latex_content: modalState.original.latex_content || '',
-            reference_answer: modalState.original.reference_answer || ''
+            reference_answer: modalState.original.reference_answer || '',
+            question_type: modalState.original.question_type || '解答题'
         };
     }
 
@@ -865,7 +892,8 @@ async function handleSaveQuestion() {
             },
             body: JSON.stringify({
                 latex_content: updatedLatex,
-                reference_answer: updatedAnswer
+                reference_answer: updatedAnswer,
+                question_type: modalState.original?.question_type || '解答题'
             })
         });
 
@@ -895,7 +923,8 @@ function exitEditMode(resetDraft = false, updatedQuestion = null) {
     if (resetDraft && modalState.original) {
         modalState.draft = {
             latex_content: modalState.original.latex_content || '',
-            reference_answer: modalState.original.reference_answer || ''
+            reference_answer: modalState.original.reference_answer || '',
+            question_type: modalState.original.question_type || '解答题'
         };
         modalState.aiSuggested = false;
     }
@@ -904,7 +933,8 @@ function exitEditMode(resetDraft = false, updatedQuestion = null) {
         modalState.original = updatedQuestion;
         modalState.draft = {
             latex_content: updatedQuestion.latex_content || '',
-            reference_answer: updatedQuestion.reference_answer || ''
+            reference_answer: updatedQuestion.reference_answer || '',
+            question_type: updatedQuestion.question_type || '解答题'
         };
         modalState.aiSuggested = false;
     }
@@ -971,6 +1001,9 @@ function setSaveButtonLoading(isLoading) {
         saveQuestionBtn.innerHTML = '<i class="fas fa-save"></i> 保存修改';
         saveQuestionBtn.classList.toggle('hidden', !modalState.isEditing);
     }
+    if (typeof updateModalEditingUI === 'function') {
+        updateModalEditingUI();
+    }
 }
 
 async function handleAiVariant() {
@@ -1007,7 +1040,8 @@ async function handleAiVariant() {
 
         modalState.draft = {
             latex_content: newLatex,
-            reference_answer: newAnswer
+            reference_answer: newAnswer,
+            question_type: (variant.question_type || modalState.original?.question_type || '解答题')
         };
         modalState.aiSuggested = true;
         modalState.isEditing = true;
@@ -1016,7 +1050,8 @@ async function handleAiVariant() {
             ...modalState.original,
             latex_content: newLatex,
             reference_answer: newAnswer,
-            tags: Array.isArray(variant.tags) ? variant.tags : (modalState.original?.tags || [])
+            tags: Array.isArray(variant.tags) ? variant.tags : (modalState.original?.tags || []),
+            question_type: modalState.draft.question_type || modalState.original?.question_type || '解答题'
         };
 
         renderModalContent(previewQuestion);
@@ -1045,6 +1080,9 @@ function setAiVariantLoading(isLoading) {
     } else {
         aiVariantBtn.disabled = !modalState.original || saveEditLoading;
         aiVariantBtn.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> AI 变题';
+    }
+    if (typeof updateModalEditingUI === 'function') {
+        updateModalEditingUI();
     }
 }
 
@@ -1096,7 +1134,8 @@ function resetModalState() {
     modalState.aiSuggested = false;
     modalState.draft = {
         latex_content: '',
-        reference_answer: ''
+        reference_answer: '',
+        question_type: '解答题'
     };
 
     if (modalQuestionContent) {
@@ -1390,6 +1429,7 @@ function renderParsedQuestions() {
                 <div class="parsed-question-content">
                     ${renderMathContent(questionText)}
                 </div>
+                <div class="parsed-meta"><strong>题型：</strong>${question.question_type || '解答题'}</div>
                 ${questionImages.length > 0 ? `
                     <div class="question-images">
                         ${questionImages.map(img => {
@@ -1462,7 +1502,8 @@ async function handleBatchSave() {
                     reference_answer: question.answer || '',
                     source: source,
                     image: question.image || [],
-                    visibility: visibility
+                    visibility: visibility,
+                    question_type: (question.question_type || '解答题')
                 })
             });
             
@@ -1523,7 +1564,8 @@ function addParsedToCart(index) {
         tags: question.tags || [],
         reference_answer: question.answer || '',
         source: '试卷解析',
-        isParsed: true
+        isParsed: true,
+        question_type: question.question_type || '解答题'
     };
     
     cart.push(cartItem);
