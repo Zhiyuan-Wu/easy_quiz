@@ -32,7 +32,6 @@ const tagFilter = document.getElementById('tag-filter');
 const searchResults = document.getElementById('search-results');
 const questionList = document.getElementById('question-list');
 const refreshBtn = document.getElementById('refresh-btn');
-const questionTypeSelect = document.getElementById('question-type');
 const prevPageBtn = document.getElementById('prev-page');
 const nextPageBtn = document.getElementById('next-page');
 const pageInfo = document.getElementById('page-info');
