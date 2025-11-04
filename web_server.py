@@ -9,12 +9,23 @@ import json
 import os
 import uuid
 import time
+from datetime import datetime
 from werkzeug.utils import secure_filename
 from question_manager import QuestionManager
 from ocr_client import DeepSeekOCRClient
 from system_manager import SystemManager
 from export_renderer import ExportRenderer
-from config import WEB_CONFIG, OCR_BASE_URL, LLM_CONFIG, SECRET_KEY, SYSTEM_DATABASE_PATH
+from student_manager import StudentManager, HomeworkItem
+from config import (
+    WEB_CONFIG,
+    OCR_BASE_URL,
+    LLM_CONFIG,
+    SECRET_KEY,
+    SYSTEM_DATABASE_PATH,
+    HOMEWORK_UPLOAD_DIR,
+    ANALYTICS_WINDOW_DAYS,
+    REPORT_MAX_ITEMS,
+)
 from logger import get_logger
 
 app = Flask(__name__)
@@ -45,6 +56,16 @@ ocr_client = DeepSeekOCRClient(OCR_BASE_URL)
 # 初始化导出渲染器
 export_renderer = ExportRenderer(UPLOAD_FOLDER)
 
+# 初始化学生管理器
+student_manager = StudentManager(
+    question_manager=question_manager,
+    system_manager=system_manager,
+    llm_client=question_manager.llm_client,
+)
+
+if not os.path.exists(HOMEWORK_UPLOAD_DIR):
+    os.makedirs(HOMEWORK_UPLOAD_DIR, exist_ok=True)
+
 # 登录验证装饰器
 def login_required(f):
     @wraps(f)
@@ -56,6 +77,96 @@ def login_required(f):
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def parse_iso_datetime(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def serialize_student(student_row):
+    if not student_row:
+        return None
+
+    avg = student_row.get('cached_average_score')
+    return {
+        'student_id': student_row.get('student_id'),
+        'name': student_row.get('name'),
+        'average_score': round(float(avg), 2) if isinstance(avg, (int, float)) else None,
+        'average_updated_at': student_row.get('cached_average_updated_at'),
+        'latest_history_timestamp': student_row.get('latest_history_timestamp'),
+        'updated_at': student_row.get('updated_at'),
+        'window_days': student_row.get('cached_average_window_days', ANALYTICS_WINDOW_DAYS),
+    }
+
+
+def serialize_history_item(row):
+    if not row:
+        return None
+
+    score = row.get('score')
+    student_answer = row.get('student_answer') or ''
+    return {
+        'id': row.get('id'),
+        'session_uid': row.get('session_uid'),
+        'export_id': row.get('export_id'),
+        'paper_title': row.get('paper_title'),
+        'question_id': row.get('question_id'),
+        'question_number': row.get('question_number'),
+        'original_question': row.get('original_question'),
+        'reference_answer': row.get('reference_answer'),
+        'student_answer': student_answer,
+        'score': round(float(score), 4) if isinstance(score, (int, float)) else None,
+        'feedback': row.get('feedback') or '',
+        'created_at': row.get('created_at'),
+        'updated_at': row.get('updated_at'),
+    }
+
+
+def collect_history_for_report(student_id):
+    history_records = student_manager.get_homework_history(
+        student_id,
+        window_days=ANALYTICS_WINDOW_DAYS,
+        limit=None,
+    )
+
+    if not history_records:
+        return [], [], None
+
+    def score_key(item):
+        score = item.get('score')
+        if score is None:
+            return (0, 0.0)
+        try:
+            return (0, float(score))
+        except (TypeError, ValueError):
+            return (0, 0.0)
+
+    sorted_history = sorted(history_records, key=score_key)
+    trimmed = sorted_history[:REPORT_MAX_ITEMS]
+
+    latest_ts = None
+    for record in history_records:
+        ts = parse_iso_datetime(record.get('created_at'))
+        if ts and (latest_ts is None or ts > latest_ts):
+            latest_ts = ts
+
+    return history_records, trimmed, latest_ts
+
+
+def generate_report_for_student(student):
+    _, history_for_report, latest_ts = collect_history_for_report(student['student_id'])
+    if not history_for_report:
+        raise ValueError('暂无做题历史，无法生成报告')
+
+    report = student_manager.generate_learning_report(student['name'], history_for_report)
+    student_manager.cache_report(student['student_id'], report, latest_ts)
+
+    return report, history_for_report, latest_ts
 
 @app.route('/')
 @login_required
@@ -93,6 +204,332 @@ def register():
         })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+# ------------------------------------------------------------------
+# 学生管理与作业解析相关API
+# ------------------------------------------------------------------
+
+@app.route('/api/students', methods=['GET'])
+@login_required
+def list_students():
+    try:
+        students = student_manager.list_students()
+        payload = []
+        for stu in students:
+            serialized = serialize_student(stu)
+            if serialized:
+                payload.append(serialized)
+        return jsonify({'success': True, 'students': payload})
+    except Exception as e:
+        logger.log_error(e, "获取学生列表失败")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/students', methods=['POST'])
+@login_required
+def add_student_api():
+    try:
+        data = request.get_json() or {}
+        student_id = (data.get('student_id') or '').strip()
+        name = (data.get('name') or '').strip()
+
+        if not student_id or not name:
+            return jsonify({'success': False, 'message': '学号和姓名不能为空'}), 400
+
+        student = student_manager.add_student(student_id, name)
+        return jsonify({'success': True, 'student': serialize_student(student)})
+    except ValueError as ve:
+        return jsonify({'success': False, 'message': str(ve)}), 400
+    except Exception as e:
+        logger.log_error(e, "新增学生失败")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/students/<student_id>/history', methods=['GET'])
+@login_required
+def get_student_history(student_id):
+    try:
+        limit = request.args.get('limit', type=int)
+        window_days = request.args.get('window_days', type=int) or ANALYTICS_WINDOW_DAYS
+
+        history_rows = student_manager.get_homework_history(student_id, window_days=window_days, limit=limit)
+        history = [serialize_history_item(row) for row in history_rows if row]
+
+        return jsonify({'success': True, 'history': history})
+    except Exception as e:
+        logger.log_error(e, f"获取学生{student_id}做题历史失败")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/students/<student_id>/homework/parse', methods=['POST'])
+@login_required
+def parse_student_homework(student_id):
+    file = request.files.get('file')
+    if file is None or file.filename == '':
+        return jsonify({'success': False, 'message': '请上传作业图片'}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({'success': False, 'message': '文件格式不支持'}), 400
+
+    export_id_raw = request.form.get('export_id')
+    student_name = (request.form.get('student_name') or '').strip()
+
+    if not export_id_raw:
+        return jsonify({'success': False, 'message': '请选择关联的试卷'}), 400
+
+    try:
+        export_id = int(export_id_raw)
+    except ValueError:
+        return jsonify({'success': False, 'message': '试卷信息无效'}), 400
+
+    student_record = student_manager.get_student(student_id)
+    if not student_record:
+        if not student_name:
+            return jsonify({'success': False, 'message': '请填写学生姓名'}), 400
+        student_record = student_manager.add_student(student_id, student_name)
+    else:
+        student_name = student_record.get('name') or student_name
+
+    filename = secure_filename(file.filename)
+    unique_filename = f"{uuid.uuid4().hex}_{filename}"
+    save_path = os.path.join(HOMEWORK_UPLOAD_DIR, unique_filename)
+
+    try:
+        file.save(save_path)
+
+        export_data = system_manager.get_export_by_id(export_id)
+        if not export_data or export_data.get('user_id') != session['user_id']:
+            return jsonify({'success': False, 'message': '无法访问指定的试卷'}), 400
+
+        question_ids = export_data.get('question_ids') or []
+        questions = []
+        for qid in question_ids:
+            question = question_manager.get_question_by_id(qid, session['user_id'])
+            if question:
+                questions.append(question)
+
+        if not questions:
+            return jsonify({'success': False, 'message': '所选试卷暂无题目信息'}), 400
+
+        paper_title = export_data.get('title') or '未命名试卷'
+
+        ocr_result = ocr_client.ocr_image(save_path)
+        ocr_text = ocr_result.get('markdown') or ocr_result.get('text') or ''
+
+        llm_results = student_manager.parse_homework_ocr(paper_title, questions, ocr_text)
+
+        results_by_id = {}
+        results_by_number = {}
+        for item in llm_results:
+            if not isinstance(item, dict):
+                continue
+            qid_val = item.get('question_id')
+            qnum_val = item.get('question_number')
+            try:
+                if qid_val is not None:
+                    results_by_id[int(qid_val)] = item
+            except (TypeError, ValueError):
+                pass
+            try:
+                if qnum_val is not None:
+                    results_by_number[int(qnum_val)] = item
+            except (TypeError, ValueError):
+                pass
+
+        normalized_results = []
+        for index, question in enumerate(questions, start=1):
+            qid = question.get('id')
+            raw_item = None
+            if qid in results_by_id:
+                raw_item = results_by_id[qid]
+            elif index in results_by_number:
+                raw_item = results_by_number[index]
+
+            student_answer = ''
+            score = 0.0
+            feedback = ''
+
+            if raw_item:
+                student_answer = raw_item.get('student_answer') or ''
+                feedback = raw_item.get('feedback') or ''
+                try:
+                    score = float(raw_item.get('score', 0))
+                except (TypeError, ValueError):
+                    score = 0.0
+                score = max(0.0, min(1.0, score))
+
+            normalized_results.append({
+                'question_id': qid,
+                'question_number': index,
+                'original_question': question.get('latex_content'),
+                'reference_answer': question.get('reference_answer'),
+                'student_answer': student_answer,
+                'score': round(score, 4),
+                'feedback': feedback,
+                'question_type': question.get('question_type'),
+                'tags': question.get('tags', []),
+                'source': question.get('source'),
+            })
+
+        return jsonify({
+            'success': True,
+            'paper_title': paper_title,
+            'student': serialize_student(student_record),
+            'export_id': export_id,
+            'results': normalized_results,
+        })
+    except Exception as e:
+        logger.log_error(e, f"作业解析失败 - 学生: {student_id}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/students/<student_id>/homework/save', methods=['POST'])
+@login_required
+def save_student_homework(student_id):
+    try:
+        data = request.get_json() or {}
+        export_id_value = data.get('export_id')
+        paper_title = data.get('paper_title') or ''
+        student_name = (data.get('student_name') or '').strip()
+        results = data.get('results') or []
+
+        if not export_id_value:
+            return jsonify({'success': False, 'message': '缺少试卷信息'}), 400
+
+        try:
+            export_id = int(export_id_value)
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'message': '试卷信息无效'}), 400
+
+        if not results:
+            return jsonify({'success': False, 'message': '没有可保存的作业结果'}), 400
+
+        student = student_manager.get_student(student_id)
+        if not student:
+            if not student_name:
+                return jsonify({'success': False, 'message': '请提供学生姓名'}), 400
+            student = student_manager.add_student(student_id, student_name)
+        else:
+            student_name = student.get('name') or student_name
+
+        items = []
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            try:
+                score = float(result.get('score', 0))
+            except (TypeError, ValueError):
+                score = 0.0
+            score = max(0.0, min(1.0, score))
+
+            item = HomeworkItem(
+                question_id=result.get('question_id'),
+                question_number=str(result.get('question_number')),
+                original_question=result.get('original_question') or '',
+                reference_answer=result.get('reference_answer') or '',
+                student_answer=result.get('student_answer') or '',
+                score=score,
+                feedback=result.get('feedback') or '',
+            )
+            items.append(item)
+
+        if not items:
+            return jsonify({'success': False, 'message': '作业结果格式无效'}), 400
+
+        session_uid = student_manager.record_homework_results(
+            student_id=student_id,
+            student_name=student_name,
+            export_id=export_id,
+            paper_title=paper_title,
+            items=items,
+            raw_payload=data,
+        )
+
+        refreshed_student = student_manager.get_student(student_id)
+
+        return jsonify({
+            'success': True,
+            'session_uid': session_uid,
+            'student': serialize_student(refreshed_student),
+        })
+    except ValueError as ve:
+        return jsonify({'success': False, 'message': str(ve)}), 400
+    except Exception as e:
+        logger.log_error(e, f"保存作业解析结果失败 - 学生: {student_id}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/students/<student_id>/report', methods=['GET'])
+@login_required
+def get_student_report(student_id):
+    try:
+        student = student_manager.get_student(student_id)
+        if not student:
+            return jsonify({'success': False, 'message': '学生不存在'}), 404
+
+        force_refresh = request.args.get('refresh', 'false').lower() == 'true'
+
+        if force_refresh or student_manager.needs_report_refresh(student_id):
+            report, history_for_report, _ = generate_report_for_student(student)
+            return jsonify({
+                'success': True,
+                'report': report,
+                'cached': False,
+                'history_preview': [serialize_history_item(item) for item in history_for_report],
+                'generated_at': datetime.utcnow().isoformat(timespec='seconds'),
+            })
+
+        cached = student_manager.get_cached_report(student_id) or {}
+        _, history_for_report, _ = collect_history_for_report(student_id)
+
+        return jsonify({
+            'success': True,
+            'report': cached,
+            'cached': True,
+            'history_preview': [serialize_history_item(item) for item in history_for_report],
+            'generated_at': student.get('cached_report_generated_at'),
+        })
+    except ValueError as ve:
+        return jsonify({'success': False, 'message': str(ve)}), 400
+    except Exception as e:
+        logger.log_error(e, f"生成学习报告失败 - 学生: {student_id}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/students/<student_id>/recommendations', methods=['GET'])
+@login_required
+def get_student_recommendations(student_id):
+    try:
+        student = student_manager.get_student(student_id)
+        if not student:
+            return jsonify({'success': False, 'message': '学生不存在'}), 404
+
+        if student_manager.needs_report_refresh(student_id):
+            report, _, _ = generate_report_for_student(student)
+        else:
+            cached = student_manager.get_cached_report(student_id)
+            report = cached if cached else {}
+            if not report:
+                report, _, _ = generate_report_for_student(student)
+
+        knowledge_points = report.get('knowledge_points') or []
+        recommendations = student_manager.build_recommendations(
+            student_id,
+            knowledge_points,
+            current_user_id=session.get('user_id')
+        )
+
+        return jsonify({
+            'success': True,
+            'reasons': recommendations.get('reasons', []),
+            'questions': recommendations.get('questions', []),
+        })
+    except ValueError as ve:
+        return jsonify({'success': False, 'message': str(ve)}), 400
+    except Exception as e:
+        logger.log_error(e, f"生成AI题目推荐失败 - 学生: {student_id}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():

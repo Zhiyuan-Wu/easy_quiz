@@ -1660,6 +1660,313 @@ mjx-container[display="true"] {
     justify-content: flex-end;
 }
 
+/* 学生管理样式 */
+.students-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.students-controls {
+    display: flex;
+    gap: 10px;
+}
+
+.students-table-wrapper {
+    position: relative;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--color-surface);
+}
+
+.students-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.students-table thead {
+    background: var(--color-surface-muted);
+}
+
+.students-table th,
+.students-table td {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--color-border);
+    text-align: left;
+    font-size: 0.95rem;
+}
+
+.students-table tbody tr:hover {
+    background: rgba(20, 118, 255, 0.06);
+}
+
+.students-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.students-empty {
+    display: none;
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--color-muted);
+}
+
+.students-empty i {
+    display: block;
+    font-size: 2.6rem;
+    margin-bottom: 12px;
+}
+
+.students-table-wrapper.empty .students-table {
+    display: none;
+}
+
+.students-table-wrapper.empty .students-empty {
+    display: block;
+}
+
+.score-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 72px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-weight: 600;
+    color: #ffffff;
+    font-size: 0.85rem;
+}
+
+.student-action-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.student-action-group .btn {
+    padding: 6px 12px;
+    font-size: 0.85rem;
+}
+
+.modal-content.small-modal {
+    max-width: 460px;
+}
+
+.modal-content.medium-modal {
+    max-width: 700px;
+}
+
+.modal-content.homework-modal-content {
+    max-width: 960px;
+}
+
+.modal-content.report-modal-content {
+    max-width: 900px;
+}
+
+.homework-meta {
+    display: flex;
+    gap: 18px;
+    color: var(--color-muted);
+    font-weight: 500;
+    margin-bottom: 16px;
+}
+
+.homework-actions {
+    margin: 18px 0;
+}
+
+.homework-results {
+    margin-top: 24px;
+}
+
+.homework-results.hidden {
+    display: none;
+}
+
+.homework-results-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.homework-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-height: 360px;
+    overflow-y: auto;
+}
+
+.homework-card {
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    padding: 16px;
+    background: var(--color-surface-muted);
+    box-shadow: var(--shadow-soft);
+}
+
+.homework-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+
+.homework-card-score {
+    font-weight: 600;
+    color: var(--color-primary);
+}
+
+.homework-card-content {
+    margin-top: 10px;
+    line-height: 1.6;
+    color: var(--color-text);
+}
+
+.homework-card-content strong {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--color-muted);
+}
+
+.history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 520px;
+    overflow-y: auto;
+}
+
+.history-item {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px;
+    background: var(--color-surface-muted);
+    box-shadow: var(--shadow-soft);
+}
+
+.history-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    color: var(--color-muted);
+    font-size: 0.9rem;
+}
+
+.history-item-content {
+    line-height: 1.6;
+    color: var(--color-text);
+}
+
+.history-item-content strong {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--color-muted);
+}
+
+.report-section {
+    margin-bottom: 20px;
+}
+
+.report-section h4 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    color: var(--color-text);
+}
+
+.report-text {
+    background: var(--color-surface-muted);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 14px;
+    line-height: 1.6;
+}
+
+.report-knowledge-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.report-knowledge-list li {
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(20, 118, 255, 0.12);
+    border: 1px solid rgba(20, 118, 255, 0.25);
+    color: var(--color-primary);
+    font-size: 0.9rem;
+}
+
+.report-plan-list {
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.recommendation-reasons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.recommendation-reasons .reason-chip {
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(255, 170, 0, 0.2);
+    border: 1px solid rgba(255, 170, 0, 0.35);
+    color: #c15a00;
+    font-size: 0.88rem;
+    font-weight: 500;
+}
+
+.recommendation-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+}
+
+.recommendation-card {
+    border: 1px solid var(--color-border);
+    border-radius: 16px;
+    padding: 18px;
+    background: var(--color-surface);
+    box-shadow: var(--shadow-soft);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.recommendation-card .card-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.recommendation-card .card-actions .btn {
+    padding: 6px 12px;
+    font-size: 0.85rem;
+}
+
+.report-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+}
+
 /* 用户中心样式 */
 .profile-container {
     max-width: 1000px;
