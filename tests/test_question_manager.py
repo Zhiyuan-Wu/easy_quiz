@@ -7,6 +7,7 @@ from question_manager import QuestionManager
 
 @pytest.fixture()
 def temp_question_manager(tmp_path):
+    """构造使用临时数据库的QuestionManager实例。"""
     db_path = tmp_path / "questions.db"
     manager = QuestionManager(db_path=str(db_path))
 
@@ -19,6 +20,7 @@ def temp_question_manager(tmp_path):
 
 
 def test_add_question_defaults_to_solution_type(temp_question_manager):
+    """默认情况下新增题目应当归类为解答题。"""
     manager = temp_question_manager
     question_id = manager.add_question(
         latex_content=r"1+1=2",
@@ -34,6 +36,7 @@ def test_add_question_defaults_to_solution_type(temp_question_manager):
 
 
 def test_add_question_respects_explicit_type(temp_question_manager):
+    """显式指定题型时应保留用户提供的类型。"""
     manager = temp_question_manager
     question_id = manager.add_question(
         latex_content=r"\\frac{1}{2} + \\frac{1}{3} = ?",
@@ -50,6 +53,7 @@ def test_add_question_respects_explicit_type(temp_question_manager):
 
 
 def test_embedding_cache_round_trip(temp_question_manager, tmp_path):
+    """验证embedding缓存的保存与重新加载流程。"""
     manager = temp_question_manager
     embed_path = Path(manager.embedding_cache_path)
     assert embed_path.exists()

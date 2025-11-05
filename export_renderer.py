@@ -350,6 +350,7 @@ class ExportRenderer:
 
     def _build_question_block(self, question: Dict, index: int, mode: str, output_dir: str,
                               copied_images: Dict[str, str]) -> str:
+        """Assemble the LaTeX snippet for one question, including images and answers."""
         latex_body = question.get('latex_content', '') or ''
         latex_body = self._convert_enumerate_to_choices(latex_body)
 
@@ -399,12 +400,14 @@ class ExportRenderer:
         return "\n".join(part for part in parts if part)
 
     def _normalize_question_type(self, question: Dict) -> str:
+        """Normalize the question type to a supported category."""
         q_type = (question.get('question_type') or '').strip()
         if q_type not in TYPE_SETTINGS:
             q_type = DEFAULT_QUESTION_TYPE
         return q_type
 
     def _group_questions_by_type(self, questions: List[Dict]) -> List[tuple]:
+        """Group questions based on normalized type in the configured order."""
         grouped = {question_type: [] for question_type in TYPE_SEQUENCE}
         for question in questions:
             normalized = self._normalize_question_type(question)
@@ -413,6 +416,7 @@ class ExportRenderer:
         return [(question_type, grouped.get(question_type, [])) for question_type in TYPE_SEQUENCE]
 
     def _format_section_title(self, question_type: str, count: int) -> str:
+        """Create a section heading summarizing score and count for a question group."""
         settings = TYPE_SETTINGS.get(question_type, TYPE_SETTINGS[DEFAULT_QUESTION_TYPE])
         score = settings.get('score', 0)
         total = score * count if score else count
@@ -424,6 +428,7 @@ class ExportRenderer:
         )
 
     def _convert_enumerate_to_choices(self, content: str) -> str:
+        """Convert enumerate environments into choice environments for LaTeX."""
         if not content:
             return ''
         processed = re.sub(r'\\begin\{enumerate\}(\[[^\]]*\])?', r'\\begin{choices}\1', content)
@@ -434,6 +439,7 @@ class ExportRenderer:
 
     def _copy_image_to_output(self, image_path: str, output_dir: str,
                                copied_images: Dict[str, str], index: int) -> str:
+        """Copy an image into the export directory and return its new filename."""
         if not image_path:
             return ''
 
@@ -532,6 +538,7 @@ class ExportRenderer:
         return content.strip()
 
     def _resolve_docx_image_path(self, image_path: str) -> Optional[str]:
+        """Resolve an image path to an absolute file path for DOCX embedding."""
         if not image_path:
             return None
 
@@ -555,6 +562,7 @@ class ExportRenderer:
         return None
 
     def _append_text_lines(self, container, lines: List[str], bullet_style: str = 'List Bullet') -> None:
+        """Append text lines into a docx paragraph or table cell with bullet handling."""
         is_table_cell = hasattr(container, '_tc')
         existing_paragraphs = list(getattr(container, 'paragraphs', [])) if is_table_cell else []
         first_paragraph = existing_paragraphs[0] if existing_paragraphs else None
@@ -579,6 +587,7 @@ class ExportRenderer:
             paragraph.paragraph_format.space_after = Pt(6)
 
     def _add_images_to_cell(self, cell, image_paths: List[str]) -> None:
+        """Insert images sequentially into a table cell, aligning them to the right."""
         existing_paragraphs = list(getattr(cell, 'paragraphs', []))
         first_paragraph = existing_paragraphs[0] if existing_paragraphs else None
 
@@ -601,6 +610,7 @@ class ExportRenderer:
             paragraph.paragraph_format.space_after = Pt(6)
 
     def _remove_table_borders(self, table) -> None:
+        """Remove all borders from a docx table element."""
         tbl = table._tbl
         tbl_pr = tbl.get_or_add_tblPr()
         tbl_borders = tbl_pr.find(qn('w:tblBorders'))

@@ -31,6 +31,7 @@ DEFAULT_QUESTION_TYPE = "解答题"
 
 
 def _sanitize_question_type(value: Optional[str]) -> str:
+    """Normalize a question type value to one of the supported choices."""
     if isinstance(value, str):
         question_type = value.strip() or DEFAULT_QUESTION_TYPE
     else:
@@ -201,6 +202,7 @@ class QuestionManager:
     def _compute_missing_embeddings_async(self, question_ids: List[int], current_user_id: int = None):
         """异步计算缺失的embedding"""
         def compute_task():
+            """Worker routine that loads questions, computes embeddings, and updates cache."""
             processed_ids = set()  # 记录成功处理的question_id
             try:
                 conn = sqlite3.connect(self.db_path)
@@ -492,9 +494,7 @@ class QuestionManager:
             # 调用大语言模型API
             response = self.llm_client.chat.completions.create(
                 model=LLM_CONFIG["model"],
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=LLM_CONFIG["max_tokens"],
-                temperature=LLM_CONFIG["temperature"]
+                messages=[{"role": "user", "content": prompt}]
             )
             response = response.choices[0].message.content
             
@@ -588,9 +588,7 @@ class QuestionManager:
 
         response = self.llm_client.chat.completions.create(
             model=LLM_CONFIG["model"],
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=LLM_CONFIG["max_tokens"],
-            temperature=LLM_CONFIG["temperature"]
+            messages=[{"role": "user", "content": prompt}]
         )
         content = response.choices[0].message.content
 
@@ -676,9 +674,7 @@ class QuestionManager:
             # 调用大语言模型API
             response = self.llm_client.chat.completions.create(
                 model=LLM_CONFIG["model"],
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=LLM_CONFIG["max_tokens"],
-                temperature=LLM_CONFIG["temperature"]
+                messages=[{"role": "user", "content": prompt}]
             )
             response = response.choices[0].message.content
             
@@ -830,6 +826,7 @@ class QuestionManager:
             rows = cursor.fetchall()
             for row in rows:
                 question = self._row_to_dict(row)
+                question['ranking_score'] = 0.0
                 keyword_questions.append(question)
         
         # 2. 获取所有可见题目
@@ -888,26 +885,25 @@ class QuestionManager:
                             # 使用faiss搜索top k个最相似的embedding
                             k_search = min(k * 2, len(visible_embeddings))
                             distances, indices = temp_index.search(query_embedding_array, k_search)
-                            
-                            # 将L2距离转换为相似度分数
-                            similarities = []
-                            similarity_map = {}  # question_id -> similarity，用于后续排序
+
+                            embedding_candidates: List[Dict] = []
                             visible_question_dict = {q['id']: q for q in all_visible_questions}
-                            
+
                             for idx, dist in zip(indices[0], distances[0]):
                                 if idx < len(visible_question_id_list):
                                     question_id = visible_question_id_list[idx]
                                     if question_id in visible_question_dict:
-                                        # L2距离转换为相似度（使用负距离，越小越好）
                                         similarity = -float(dist)
                                         question = visible_question_dict[question_id]
-                                        similarities.append((similarity, question))
-                                        similarity_map[question_id] = similarity
-                            
-                            # 按相似度排序，取top k
-                            similarities.sort(key=lambda x: x[0], reverse=True)
-                            embedding_questions = [q for _, q in similarities[:k]]
-                            embedding_similarity_map = similarity_map  # 保存similarity映射
+                                        question_with_score = dict(question)
+                                        question_with_score['ranking_score'] = similarity
+                                        embedding_candidates.append(question_with_score)
+                                        embedding_similarity_map[question_id] = similarity
+
+                            embedding_candidates.sort(
+                                key=lambda item: item.get('ranking_score', 0.0), reverse=True
+                            )
+                            embedding_questions = embedding_candidates[:k]
                         except Exception as e:
                             self.logger.log_error(e, "Faiss搜索失败")
                             embedding_questions = []
@@ -921,7 +917,12 @@ class QuestionManager:
             result_dict[question['id']] = question
         
         for question in embedding_questions:
-            if question['id'] not in result_dict:
+            existing = result_dict.get(question['id'])
+            if existing:
+                existing_score = existing.get('ranking_score', 0.0)
+                new_score = question.get('ranking_score', 0.0)
+                existing['ranking_score'] = max(existing_score, new_score)
+            else:
                 result_dict[question['id']] = question
         
         # 5. 如果有缺失的embedding，启动异步任务计算
@@ -948,6 +949,7 @@ class QuestionManager:
         embedding_question_ids = {q['id'] for q in embedding_questions}
         
         def sort_key(q):
+            """Sort questions prioritizing keyword hits, then embedding similarity."""
             q_id = q['id']
             in_keyword = q_id in keyword_question_ids
             in_embedding = q_id in embedding_question_ids
@@ -1015,6 +1017,7 @@ class QuestionManager:
         
         # 安全地获取列值，处理可能不存在的列
         def get_column_value(column_name, default=None):
+            """Safely return a column value from the row or a supplied default."""
             if column_name in column_map:
                 idx = column_map[column_name]
                 if idx < len(row):

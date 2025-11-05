@@ -3,6 +3,7 @@ from pathlib import Path
 from config import EMBEDDING_CONFIG
 
 class DeepSeekOCRClient:
+    """Lightweight client for interacting with the DeepSeek OCR and embedding services."""
     def __init__(self, base_url: str = "http://localhost:5000"):
         """
         初始化 OCR 客户端

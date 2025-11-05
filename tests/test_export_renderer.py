@@ -8,12 +8,14 @@ from export_renderer import ExportRenderer
 
 @pytest.fixture()
 def renderer(tmp_path):
+    """创建用于测试的ExportRenderer实例。"""
     upload_dir = tmp_path / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
     return ExportRenderer(upload_folder=str(upload_dir))
 
 
 def sample_questions():
+    """提供一组覆盖不同题型的示例试题。"""
     return [
         {
             "id": 1,
@@ -43,6 +45,7 @@ def sample_questions():
 
 
 def test_render_latex_sections_order(renderer, tmp_path):
+    """验证LaTeX导出会按照题型顺序生成分节。"""
     questions = sample_questions()
     latex_content = renderer.render_latex(questions, mode='questions', title='测试试卷')
 
@@ -58,6 +61,7 @@ def test_render_latex_sections_order(renderer, tmp_path):
 
 
 def test_render_docx_generates_group_headings(renderer, tmp_path):
+    """确保DOCX导出包含题型分组标题。"""
     questions = sample_questions()
     docx_path = renderer.render_docx(questions, mode='with-answers', title='测试试卷')
     assert Path(docx_path).exists()

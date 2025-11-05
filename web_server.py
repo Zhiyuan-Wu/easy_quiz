@@ -68,18 +68,22 @@ if not os.path.exists(HOMEWORK_UPLOAD_DIR):
 
 # 登录验证装饰器
 def login_required(f):
+    """登录保护装饰器，未登录时重定向到登录页。"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        """Wrapper that enforces presence of a user session before processing."""
         if 'user_id' not in session:
             return redirect(url_for('login_page'))
         return f(*args, **kwargs)
     return decorated_function
 
 def allowed_file(filename):
+    """判断上传的文件是否具有允许的扩展名。"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 def parse_iso_datetime(value):
+    """将ISO字符串解析为datetime对象，失败时返回None。"""
     if not value:
         return None
     try:
@@ -89,6 +93,7 @@ def parse_iso_datetime(value):
 
 
 def serialize_student(student_row):
+    """将学生数据库记录转换为API响应所需的字段结构。"""
     if not student_row:
         return None
 
@@ -105,6 +110,7 @@ def serialize_student(student_row):
 
 
 def serialize_history_item(row):
+    """将作业历史记录序列化为前端友好的格式。"""
     if not row:
         return None
 
@@ -128,6 +134,7 @@ def serialize_history_item(row):
 
 
 def collect_history_for_report(student_id):
+    """收集生成学习报告所需的历史记录、截断清单与最新时间戳。"""
     history_records = student_manager.get_homework_history(
         student_id,
         window_days=ANALYTICS_WINDOW_DAYS,
@@ -138,6 +145,7 @@ def collect_history_for_report(student_id):
         return [], [], None
 
     def score_key(item):
+        """稳定地按得分排序，缺失或异常分数视为0。"""
         score = item.get('score')
         if score is None:
             return (0, 0.0)
@@ -159,6 +167,7 @@ def collect_history_for_report(student_id):
 
 
 def generate_report_for_student(student):
+    """根据学生错题历史生成学习报告并更新缓存。"""
     _, history_for_report, latest_ts = collect_history_for_report(student['student_id'])
     if not history_for_report:
         raise ValueError('暂无做题历史，无法生成报告')
@@ -213,6 +222,7 @@ def register():
 @app.route('/api/students', methods=['GET'])
 @login_required
 def list_students():
+    """学生列表API"""
     try:
         user_id = session['user_id']
         students = student_manager.list_students(user_id)
@@ -230,6 +240,7 @@ def list_students():
 @app.route('/api/students', methods=['POST'])
 @login_required
 def add_student_api():
+    """新增学生API"""
     try:
         data = request.get_json() or {}
         student_id = (data.get('student_id') or '').strip()
@@ -251,6 +262,7 @@ def add_student_api():
 @app.route('/api/students/<student_id>/history', methods=['GET'])
 @login_required
 def get_student_history(student_id):
+    """获取学生作业历史API"""
     try:
         limit = request.args.get('limit', type=int)
         window_days = request.args.get('window_days', type=int) or ANALYTICS_WINDOW_DAYS
@@ -267,6 +279,7 @@ def get_student_history(student_id):
 @app.route('/api/students/<student_id>/homework/parse', methods=['POST'])
 @login_required
 def parse_student_homework(student_id):
+    """解析学生上传的作业图片并返回批改结果。"""
     file = request.files.get('file')
     if file is None or file.filename == '':
         return jsonify({'success': False, 'message': '请上传作业图片'}), 400
@@ -390,6 +403,7 @@ def parse_student_homework(student_id):
 @app.route('/api/students/<student_id>/homework/save', methods=['POST'])
 @login_required
 def save_student_homework(student_id):
+    """保存学生作业批改结果API"""
     try:
         data = request.get_json() or {}
         export_id_value = data.get('export_id')
@@ -468,6 +482,7 @@ def save_student_homework(student_id):
 @app.route('/api/students/<student_id>/report', methods=['GET'])
 @login_required
 def get_student_report(student_id):
+    """获取或生成学生学习报告API"""
     try:
         user_id = session['user_id']
         student = student_manager.get_student(student_id, user_id)
@@ -506,31 +521,21 @@ def get_student_report(student_id):
 @app.route('/api/students/<student_id>/recommendations', methods=['GET'])
 @login_required
 def get_student_recommendations(student_id):
+    """获取学生题目推荐API"""
     try:
         user_id = session['user_id']
         student = student_manager.get_student(student_id, user_id)
         if not student:
             return jsonify({'success': False, 'message': '学生不存在'}), 404
 
-        if student_manager.needs_report_refresh(student_id):
-            report, _, _ = generate_report_for_student(student)
-        else:
-            cached = student_manager.get_cached_report(student_id)
-            report = cached if cached else {}
-            if not report:
-                report, _, _ = generate_report_for_student(student)
-
-        knowledge_points = report.get('knowledge_points') or []
         recommendations = student_manager.build_recommendations(
             student_id,
-            knowledge_points,
-            current_user_id=session.get('user_id')
+            current_user_id=user_id
         )
 
         return jsonify({
             'success': True,
-            'reasons': recommendations.get('reasons', []),
-            'questions': recommendations.get('questions', []),
+            'questions': recommendations,
         })
     except ValueError as ve:
         return jsonify({'success': False, 'message': str(ve)}), 400

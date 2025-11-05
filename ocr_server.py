@@ -47,6 +47,7 @@ RESULT_BASE.mkdir(exist_ok=True)
 # ✅ 新增：根路径，用于服务状态检查
 @app.route('/', methods=['GET'])
 def home():
+    """Provide a simple status page confirming the OCR service is online."""
     return """
     <h2>✅ DeepSeek-OCR Service is Running!</h2>
     <p>Use <code>POST /ocr</code> with a PNG/JPG file to perform OCR.</p>
@@ -56,6 +57,7 @@ def home():
 # OCR 接口
 @app.route('/ocr', methods=['POST'])
 def ocr_endpoint():
+    """Process an image upload, run OCR, and return markdown plus embedded images."""
     if 'file' not in request.files:
         return jsonify({"error": "No file provided"}), 400
 
