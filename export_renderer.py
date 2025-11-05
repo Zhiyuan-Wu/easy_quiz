@@ -686,11 +686,21 @@ class ExportRenderer:
             None。
         """
         tbl = table._tbl
-        tbl_pr = tbl.get_or_add_tblPr()
+        
+        # 获取或创建 tblPr 元素
+        # 使用 find 方法查找，如果不存在则创建
+        tbl_pr = tbl.find(qn('w:tblPr'))
+        if tbl_pr is None:
+            tbl_pr = OxmlElement('w:tblPr')
+            # 将 tblPr 插入到表格元素的开始位置
+            tbl.insert(0, tbl_pr)
+        
+        # 查找并移除现有的 tblBorders
         tbl_borders = tbl_pr.find(qn('w:tblBorders'))
         if tbl_borders is not None:
             tbl_pr.remove(tbl_borders)
 
+        # 创建新的无边框设置
         tbl_borders = OxmlElement('w:tblBorders')
         for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
             edge_element = OxmlElement(f'w:{edge}')
