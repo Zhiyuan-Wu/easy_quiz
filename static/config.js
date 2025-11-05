@@ -24,9 +24,9 @@ window.APP_CONFIG = {
     content: {
         manageListPageSize: 10,          // 题目管理列表每页条数
         questionCard: {
-            maxLinesDesktop: 8,          // PC端最大显示行数
-            maxLinesMobile: 6,           // 移动端最大显示行数
-            gradientHeight: 48           // 渐隐高度（像素）
+            maxLinesDesktop: 8,         // PC端最大显示行数
+            maxLinesMobile: 6,          // 移动端最大显示行数
+            gradientHeight: 24           // 渐隐高度（像素）
         },
         cartPreviewMaxChars: 120,        // 购物车题目内容预览最大字符数
         questionPreviewMaxChars: 160     // 列表题目预览最大字符数

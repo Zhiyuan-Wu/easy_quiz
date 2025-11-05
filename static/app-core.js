@@ -144,6 +144,9 @@ document.addEventListener('DOMContentLoaded', () => {
 async function initializeApp() {
     await checkLoginStatus();
 
+    // 根据配置设置CSS变量
+    applyConfigToCSS();
+
     setupEventListeners();
 
     await loadAvailableTags();
@@ -163,6 +166,50 @@ async function initializeApp() {
     }, 100);
 
     updateCartBadge();
+}
+
+// 根据配置应用CSS变量
+function applyConfigToCSS() {
+    if (!window.APP_CONFIG) {
+        return;
+    }
+
+    const root = document.documentElement;
+    const lineHeight = 1.6; // 与CSS中的line-height保持一致
+    
+    // 题目卡片配置
+    if (window.APP_CONFIG.content && window.APP_CONFIG.content.questionCard) {
+        const config = window.APP_CONFIG.content.questionCard;
+        const mobileBreakpoint = window.APP_CONFIG.layout?.mobileBreakpoint || 900;
+        
+        // 计算桌面端和移动端的最大高度（行数 × 行高）
+        const maxLinesDesktop = config.maxLinesDesktop || 16;
+        const maxLinesMobile = config.maxLinesMobile || 12;
+        const maxHeightDesktop = `calc(${maxLinesDesktop} * ${lineHeight}em)`;
+        const maxHeightMobile = `calc(${maxLinesMobile} * ${lineHeight}em)`;
+        
+        // 设置桌面端和移动端的最大高度值
+        root.style.setProperty('--question-card-max-height-desktop', maxHeightDesktop);
+        root.style.setProperty('--question-card-max-height-mobile', maxHeightMobile);
+        root.style.setProperty('--question-card-gradient-height', (config.gradientHeight || 48) + 'px');
+        
+        // 更新当前屏幕尺寸下的最大高度
+        function updateMaxHeight() {
+            const isMobile = window.innerWidth < mobileBreakpoint;
+            const maxHeight = isMobile ? maxHeightMobile : maxHeightDesktop;
+            root.style.setProperty('--max-height', maxHeight);
+        }
+        
+        // 初始设置
+        updateMaxHeight();
+        
+        // 监听窗口大小变化（使用防抖优化性能）
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(updateMaxHeight, 100);
+        });
+    }
 }
 
 async function checkLoginStatus() {

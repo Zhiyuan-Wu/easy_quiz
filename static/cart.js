@@ -76,13 +76,12 @@ function renderCart() {
 
     cartItemsDiv.innerHTML = cart.map((item, index) => {
         const previewText = truncatePlainText(renderMathContent(item.latex_content), CART_PREVIEW_MAX_CHARS);
+        const tagsHtml = Array.isArray(item.tags) && item.tags.length > 0
+            ? item.tags.map(tag => `<span class="question-tag">${tag}</span>`).join('')
+            : '';
 
         return `
             <div class="cart-item" data-index="${index}">
-                <div class="cart-item-content">
-                    <div class="cart-item-title">题目 ${index + 1}</div>
-                    <div class="cart-item-preview" title="${previewText}">${previewText}</div>
-                </div>
                 <div class="cart-item-actions">
                     ${index > 0 ? `<button class="cart-item-btn btn-move-up" onclick="moveCartItem(${index}, -1)">
                         <i class="fas fa-arrow-up"></i>
@@ -90,6 +89,15 @@ function renderCart() {
                     ${index < cart.length - 1 ? `<button class="cart-item-btn btn-move-down" onclick="moveCartItem(${index}, 1)">
                         <i class="fas fa-arrow-down"></i>
                     </button>` : ''}
+                </div>
+                <div class="cart-item-content">
+                    <div class="cart-item-title">
+                        题目 ${index + 1}
+                        ${tagsHtml ? `<div class="question-tags">${tagsHtml}</div>` : ''}
+                    </div>
+                    <div class="cart-item-preview" title="${previewText}">${previewText}</div>
+                </div>
+                <div class="cart-item-remove">
                     <button class="cart-item-btn btn-remove-cart" onclick="removeFromCart(${index})">
                         <i class="fas fa-times"></i>
                     </button>

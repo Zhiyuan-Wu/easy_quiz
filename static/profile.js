@@ -290,11 +290,17 @@ function displayReExportQuestions(questions) {
         // 安全地处理题目内容，避免HTML注入
         const content = question.latex_content || '题目内容';
         const preview = content.length > 80 ? content.substring(0, 80) + '...' : content;
+        const tagsHtml = Array.isArray(question.tags) && question.tags.length > 0
+            ? question.tags.map(tag => `<span class="question-tag">${escapeHtml(tag)}</span>`).join('')
+            : '';
         
         return `
             <div class="cart-item" data-index="${index}">
                 <div class="cart-item-content">
-                    <div class="cart-item-title">题目 ${index + 1}</div>
+                    <div class="cart-item-title">
+                        题目 ${index + 1}
+                        ${tagsHtml ? `<div class="question-tags">${tagsHtml}</div>` : ''}
+                    </div>
                     <div class="cart-item-preview">${escapeHtml(preview)}</div>
                 </div>
             </div>
