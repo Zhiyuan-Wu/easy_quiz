@@ -16,7 +16,7 @@ class SystemManager:
         """
         初始化系统管理器
         
-        Args:
+        参数:
             db_path: 系统数据库文件路径
         """
         self.db_path = db_path
@@ -92,10 +92,10 @@ class SystemManager:
         """
         对密码进行哈希
         
-        Args:
+        参数:
             password: 明文密码
             
-        Returns:
+        返回:
             哈希后的密码
         """
         return hashlib.sha256(password.encode('utf-8')).hexdigest()
@@ -104,12 +104,12 @@ class SystemManager:
         """
         注册新用户
         
-        Args:
+        参数:
             username: 用户名
             password: 密码
             email: 邮箱（可选）
             
-        Returns:
+        返回:
             (success, message)
         """
         if not username or len(username) < 3:
@@ -147,11 +147,11 @@ class SystemManager:
         """
         验证用户登录
         
-        Args:
+        参数:
             username: 用户名
             password: 密码
             
-        Returns:
+        返回:
             用户信息字典，如果验证失败返回None
         """
         conn = sqlite3.connect(self.db_path)
@@ -183,10 +183,10 @@ class SystemManager:
         """
         根据ID获取用户信息
         
-        Args:
+        参数:
             user_id: 用户ID
             
-        Returns:
+        返回:
             用户信息字典，如果不存在返回None
         """
         conn = sqlite3.connect(self.db_path)
@@ -217,10 +217,10 @@ class SystemManager:
         """
         根据用户名获取用户信息
         
-        Args:
+        参数:
             username: 用户名
             
-        Returns:
+        返回:
             用户信息字典，如果不存在返回None
         """
         conn = sqlite3.connect(self.db_path)
@@ -251,12 +251,12 @@ class SystemManager:
         """
         更新用户密码
         
-        Args:
+        参数:
             user_id: 用户ID
             old_password: 旧密码
             new_password: 新密码
             
-        Returns:
+        返回:
             (success, message)
         """
         if not new_password or len(new_password) < 6:
@@ -298,10 +298,10 @@ class SystemManager:
         """
         获取所有标签，按使用频率排序
         
-        Args:
+        参数:
             limit: 返回标签数量限制
             
-        Returns:
+        返回:
             标签列表
         """
         conn = sqlite3.connect(self.db_path)
@@ -333,10 +333,10 @@ class SystemManager:
         """
         添加标签或增加使用计数
         
-        Args:
+        参数:
             tag_name: 标签名称
             
-        Returns:
+        返回:
             是否成功
         """
         conn = sqlite3.connect(self.db_path)
@@ -364,10 +364,10 @@ class SystemManager:
         """
         根据名称获取标签
         
-        Args:
+        参数:
             name: 标签名称
             
-        Returns:
+        返回:
             标签信息字典，如果不存在返回None
         """
         conn = sqlite3.connect(self.db_path)
@@ -399,14 +399,14 @@ class SystemManager:
         """
         保存导出历史
         
-        Args:
+        参数:
             user_id: 用户ID
             title: 导出标题
             question_ids: 题目ID列表
             export_format: 导出格式
             export_mode: 导出模式
             
-        Returns:
+        返回:
             导出历史ID
         """
         conn = sqlite3.connect(self.db_path)
@@ -430,11 +430,11 @@ class SystemManager:
         """
         获取用户的导出历史
         
-        Args:
+        参数:
             user_id: 用户ID
             limit: 返回数量限制
             
-        Returns:
+        返回:
             导出历史列表
         """
         conn = sqlite3.connect(self.db_path)
@@ -470,10 +470,10 @@ class SystemManager:
         """
         根据ID获取导出历史详情
         
-        Args:
+        参数:
             export_id: 导出历史ID
             
-        Returns:
+        返回:
             导出历史详情，如果不存在返回None
         """
         conn = sqlite3.connect(self.db_path)

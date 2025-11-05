@@ -3,23 +3,30 @@ from pathlib import Path
 from config import EMBEDDING_CONFIG
 
 class DeepSeekOCRClient:
-    """Lightweight client for interacting with the DeepSeek OCR and embedding services."""
+    """DeepSeek OCR 与向量服务的轻量级客户端。"""
     def __init__(self, base_url: str = "http://localhost:5000"):
-        """
-        初始化 OCR 客户端
-        
-        :param base_url: OCR 服务的根地址，例如 "http://localhost:5000"
+        """初始化 OCR 客户端。
+
+        参数:
+            base_url: OCR 服务的根地址，例如 "http://localhost:5000"。
+
+        返回:
+            None。
         """
         self.base_url = base_url.rstrip('/')
         self.ocr_endpoint = f"{self.base_url}/ocr"
 
     def ocr_image(self, image_path: str) -> dict:
-        """
-        上传本地图片并获取 OCR 结果（Markdown 格式）
-        
-        :param image_path: 本地图片路径（支持 PNG/JPG）
-        :return: 包含 'request_id', 'markdown' 和 'images' 的字典
-        :raises: requests.HTTPError, FileNotFoundError 等
+        """上传本地图片并获取 OCR 结果（Markdown 格式）。
+
+        参数:
+            image_path: 本地图片路径，支持 PNG/JPG。
+
+        返回:
+            包含 `request_id`、`markdown` 与 `images` 的字典。
+
+        异常:
+            requests.HTTPError, FileNotFoundError, ValueError。
         """
         image_path = Path(image_path)
         if not image_path.is_file():
@@ -42,12 +49,16 @@ class DeepSeekOCRClient:
         return result
     
     def get_embeddings(self, texts: list) -> list:
-        """
-        获取文本的embedding向量
-        
-        :param texts: 文本列表，例如 ["First sentence", "Second sentence"]
-        :return: embedding向量列表，每个向量是一个浮点数列表
-        :raises: requests.HTTPError
+        """获取文本的 embedding 向量。
+
+        参数:
+            texts: 文本列表，例如 ["First sentence", "Second sentence"]。
+
+        返回:
+            embedding 向量列表，每个元素为浮点数组。
+
+        异常:
+            requests.HTTPError, ValueError。
         """
         url = EMBEDDING_CONFIG["api_url"]
         headers = {

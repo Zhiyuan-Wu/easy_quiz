@@ -27,19 +27,37 @@ from json_repair import repair_json
 
 
 def _ensure_parent_dir(path: str) -> None:
-    """Create the parent directory for a file path when it does not exist."""
+    """确保目标路径的父目录存在。
+
+    参数:
+        path: 需要验证的文件路径。
+
+    返回:
+        None。
+    """
     parent = os.path.dirname(os.path.abspath(path))
     if parent and not os.path.exists(parent):
         os.makedirs(parent, exist_ok=True)
 
 
 def _utc_now() -> datetime:
-    """Return the current UTC datetime."""
+    """获取当前的 UTC 时间。
+
+    返回:
+        当前 UTC 时间的 datetime 对象。
+    """
     return datetime.utcnow()
 
 
 def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
-    """Convert an ISO formatted string to a datetime instance if possible."""
+    """将 ISO 格式字符串转换为 datetime 对象。
+
+    参数:
+        value: ISO 格式的时间字符串，可能为 None。
+
+    返回:
+        转换后的 datetime 对象，若无法转换则返回 None。
+    """
     if not value:
         return None
     try:
@@ -49,14 +67,28 @@ def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
 
 
 def _format_timestamp(dt: Optional[datetime]) -> Optional[str]:
-    """Serialize a datetime object to an ISO formatted string with second precision."""
+    """将 datetime 对象格式化为秒级精度的 ISO 字符串。
+
+    参数:
+        dt: 需要格式化的 datetime 对象，可能为 None。
+
+    返回:
+        格式化后的字符串；如果输入为 None 则返回 None。
+    """
     if dt is None:
         return None
     return dt.isoformat(timespec="seconds")
 
 
 def _extract_outermost_json_block(raw_text: str) -> str:
-    """Extract the outermost JSON object string from LLM output."""
+    """从 LLM 输出中提取最外层的 JSON 文本。
+
+    参数:
+        raw_text: 原始的模型输出文本。
+
+    返回:
+        匹配到的最外层 JSON 字符串。
+    """
     match = re.search(r"\{.*\}", raw_text, re.DOTALL)
     if not match:
         raise ValueError("未在模型输出中找到JSON对象")
@@ -65,7 +97,17 @@ def _extract_outermost_json_block(raw_text: str) -> str:
 
 @dataclass
 class HomeworkItem:
-    """Structured container for a single homework evaluation item."""
+    """单道作业批改记录的数据结构。
+
+    属性:
+        question_id: 题目在题库中的 ID，可能为 None。
+        question_number: 题目编号字符串。
+        original_question: 原题 LaTeX 内容。
+        reference_answer: 参考答案内容。
+        student_answer: 学生作答文本。
+        score: 批改得分，范围 0~1。
+        feedback: 针对该题的反馈。
+    """
 
     question_id: Optional[int]
     question_number: str
@@ -85,7 +127,16 @@ class StudentManager:
         system_manager,
         llm_client: OpenAI,
     ) -> None:
-        """Initialize the student manager with dependent services and database setup."""
+        """初始化学生管理器并完成数据库准备。
+
+        参数:
+            question_manager: 题目管理器实例。
+            system_manager: 系统管理器实例。
+            llm_client: LLM 客户端对象。
+
+        返回:
+            None。
+        """
         self.logger = get_logger()
         self.question_manager = question_manager
         self.system_manager = system_manager
@@ -102,19 +153,31 @@ class StudentManager:
     # 数据库初始化与连接
     # ------------------------------------------------------------------
     def _student_conn(self) -> sqlite3.Connection:
-        """Create a SQLite connection to the student database."""
+        """创建学生信息数据库的连接。
+
+        返回:
+            sqlite3.Connection 对象，用于访问学生数据表。
+        """
         conn = sqlite3.connect(STUDENT_DATABASE_PATH)
         conn.row_factory = sqlite3.Row
         return conn
 
     def _homework_conn(self) -> sqlite3.Connection:
-        """Create a SQLite connection to the homework results database."""
+        """创建作业批改结果数据库的连接。
+
+        返回:
+            sqlite3.Connection 对象，用于访问作业结果数据表。
+        """
         conn = sqlite3.connect(HOMEWORK_DATABASE_PATH)
         conn.row_factory = sqlite3.Row
         return conn
 
     def _init_student_db(self) -> None:
-        """Ensure the student metadata table exists and has required indexes."""
+        """初始化学生信息表并创建必要索引。
+
+        返回:
+            None。
+        """
         conn = self._student_conn()
         try:
             conn.execute(
@@ -152,7 +215,11 @@ class StudentManager:
             conn.close()
 
     def _init_homework_db(self) -> None:
-        """Ensure the homework results table exists and has required indexes."""
+        """初始化作业结果表并创建必要索引。
+
+        返回:
+            None。
+        """
         conn = self._homework_conn()
         try:
             conn.execute(
@@ -194,7 +261,16 @@ class StudentManager:
     # 学生基本信息
     # ------------------------------------------------------------------
     def add_student(self, student_id: str, name: str, user_id: int) -> Dict:
-        """Create a new student entry and return the stored record."""
+        """创建新学生记录并返回数据库中的存储结果。
+
+        参数:
+            student_id: 学生编号。
+            name: 学生姓名。
+            user_id: 当前用户的 ID。
+
+        返回:
+            包含学生信息的字典。
+        """
         student_id = student_id.strip()
         name = name.strip()
         if not student_id or not name:
@@ -222,7 +298,15 @@ class StudentManager:
         return self.get_student(student_id, user_id)
 
     def get_student(self, student_id: str, user_id: int) -> Optional[Dict]:
-        """Fetch a student by identifier, refreshing cached metrics when needed."""
+        """根据学号查询学生信息，并在必要时刷新缓存数据。
+
+        参数:
+            student_id: 学生编号。
+            user_id: 当前用户的 ID。
+
+        返回:
+            学生信息字典，若不存在则为 None。
+        """
         conn = self._student_conn()
         try:
             row = conn.execute(
@@ -237,7 +321,14 @@ class StudentManager:
             conn.close()
 
     def list_students(self, user_id: int) -> List[Dict]:
-        """List all students for a user, returning cache-refresh results."""
+        """获取指定用户下的学生列表，并返回缓存已刷新后的数据。
+
+        参数:
+            user_id: 当前用户的 ID。
+
+        返回:
+            学生信息字典的列表。
+        """
         conn = self._student_conn()
         try:
             rows = conn.execute(
@@ -257,7 +348,14 @@ class StudentManager:
     # 平均分缓存
     # ------------------------------------------------------------------
     def _ensure_average_cache(self, student_row: Dict) -> Dict:
-        """Ensure the average score cache is fresh and return the latest student record."""
+        """确保学生的平均分缓存有效，并返回更新后的记录。
+
+        参数:
+            student_row: 学生数据行字典。
+
+        返回:
+            经过缓存刷新后的学生信息字典。
+        """
         student_id = student_row.get("student_id")
         if not student_id:
             return student_row
@@ -336,7 +434,15 @@ class StudentManager:
         return student_row
 
     def _compute_average(self, student_id: str, window_days: int) -> Tuple[Optional[float], Optional[datetime]]:
-        """Calculate average score for a student within a sliding window."""
+        """在指定时间窗口内计算学生的平均得分。
+
+        参数:
+            student_id: 学生编号。
+            window_days: 统计时间窗口的天数。
+
+        返回:
+            (平均分, 最新作业时间) 的二元组，若无数据则对应元素为 None。
+        """
         conn = self._homework_conn()
         try:
             cutoff = _format_timestamp(_utc_now() - timedelta(days=window_days))
@@ -376,7 +482,20 @@ class StudentManager:
         user_id: int,
         raw_payload: Optional[Dict] = None,
     ) -> str:
-        """Persist a batch of homework evaluation results and return the session ID."""
+        """保存一批作业批改结果并返回会话 ID。
+
+        参数:
+            student_id: 学生编号。
+            student_name: 学生姓名。
+            export_id: 关联的导出记录 ID。
+            paper_title: 试卷标题。
+            items: 作业批改结果列表。
+            user_id: 当前用户 ID。
+            raw_payload: 原始请求载荷，可选。
+
+        返回:
+            新生成的作业记录会话 ID。
+        """
         if not self.get_student(student_id, user_id):
             self.add_student(student_id, student_name, user_id)
 
@@ -446,7 +565,14 @@ class StudentManager:
         return session_uid
 
     def _get_latest_history_timestamp(self, student_id: str) -> Optional[datetime]:
-        """Retrieve the most recent homework submission timestamp for a student."""
+        """获取学生最近一次作业记录的时间戳。
+
+        参数:
+            student_id: 学生编号。
+
+        返回:
+            最近一次记录的 datetime 对象，若不存在则为 None。
+        """
         conn = self._homework_conn()
         try:
             row = conn.execute(
@@ -471,7 +597,16 @@ class StudentManager:
         window_days: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> List[Dict]:
-        """Fetch historical homework results filtered by time window and limit."""
+        """获取学生的历史作业记录，可按时间窗口与数量限制过滤。
+
+        参数:
+            student_id: 学生编号。
+            window_days: 时间窗口天数，None 表示不限制。
+            limit: 返回条目数量上限，None 表示不限制。
+
+        返回:
+            作业记录字典列表。
+        """
         conn = self._homework_conn()
         try:
             params: List = [student_id]
@@ -495,7 +630,14 @@ class StudentManager:
     # 报告缓存
     # ------------------------------------------------------------------
     def get_cached_report(self, student_id: str) -> Optional[Dict]:
-        """Return a cached learning report for a student when available."""
+        """获取学生的缓存学习报告。
+
+        参数:
+            student_id: 学生编号。
+
+        返回:
+            报告数据字典，若无缓存则为 None。
+        """
         conn = self._student_conn()
         try:
             row = conn.execute(
@@ -512,7 +654,15 @@ class StudentManager:
             conn.close()
 
     def needs_report_refresh(self, student_id: str, cached_report: Optional[Dict] = None) -> bool:
-        """Determine whether a student's learning report should be regenerated."""
+        """判断学生的学习报告是否需要重新生成。
+
+        参数:
+            student_id: 学生编号。
+            cached_report: 已获取的缓存报告，可选。
+
+        返回:
+            若需要刷新返回 True，否则返回 False。
+        """
         cached = cached_report if cached_report is not None else self.get_cached_report(student_id)
         if not cached:
             return True
@@ -524,7 +674,16 @@ class StudentManager:
         return False
 
     def cache_report(self, student_id: str, report: Dict, history_timestamp: Optional[datetime]) -> None:
-        """Persist a generated learning report in the student cache."""
+        """将生成的学习报告写入学生缓存。
+
+        参数:
+            student_id: 学生编号。
+            report: 报告数据字典。
+            history_timestamp: 报告对应的历史时间戳，可为 None。
+
+        返回:
+            None。
+        """
         conn = self._student_conn()
         try:
             now_iso = _format_timestamp(_utc_now())
@@ -558,7 +717,16 @@ class StudentManager:
         questions: List[Dict],
         ocr_text: str,
     ) -> str:
-        """Compose the grading prompt that will be sent to the language model."""
+        """生成用于作业批改的提示词。
+
+        参数:
+            paper_title: 试卷标题。
+            questions: 试卷题目列表。
+            ocr_text: 学生作业的 OCR 文本。
+
+        返回:
+            构造好的提示词字符串。
+        """
         question_block = json.dumps(
             [
                 {
@@ -610,7 +778,16 @@ class StudentManager:
         questions: List[Dict],
         ocr_text: str,
     ) -> List[Dict]:
-        """Invoke the LLM to score OCR homework content and return structured results."""
+        """调用大模型批改作业并返回结构化结果。
+
+        参数:
+            paper_title: 试卷标题。
+            questions: 试卷题目列表。
+            ocr_text: OCR 识别出的学生作业文本。
+
+        返回:
+            批改结果字典列表。
+        """
         prompt = self.build_homework_prompt(paper_title, questions, ocr_text)
         self.logger.log_llm_prompt(prompt, "作业批改")
 
@@ -633,7 +810,15 @@ class StudentManager:
             raise ValueError("作业批改失败，请稍后重试") from exc
 
     def build_report_prompt(self, student_name: str, history: List[Dict]) -> str:
-        """Construct the study report prompt for the language model."""
+        """生成学习报告的提示词文本。
+
+        参数:
+            student_name: 学生姓名。
+            history: 学生历史错题记录列表。
+
+        返回:
+            拼接后的提示词字符串。
+        """
         history_payload = json.dumps(
             [
                 {
@@ -673,7 +858,15 @@ class StudentManager:
         return prompt
 
     def generate_learning_report(self, student_name: str, history: List[Dict]) -> Dict:
-        """Generate and parse a study report for a student using the LLM."""
+        """调用大模型生成学习报告并解析结果。
+
+        参数:
+            student_name: 学生姓名。
+            history: 错题记录列表。
+
+        返回:
+            结构化的学习报告字典。
+        """
         if not history:
             raise ValueError("缺少做题历史，无法生成报告")
 
@@ -703,7 +896,14 @@ class StudentManager:
     def _collect_report_history(
         self, student_id: str
     ) -> Tuple[List[Dict], List[Dict], Optional[datetime]]:
-        """Gather full and trimmed history used for report and recommendation generation."""
+        """收集报告及推荐所需的历史数据。
+
+        参数:
+            student_id: 学生编号。
+
+        返回:
+            (全部历史列表, 截断后的列表, 最新时间戳) 的三元组。
+        """
         history_records = self.get_homework_history(
             student_id,
             window_days=ANALYTICS_WINDOW_DAYS,
@@ -714,7 +914,14 @@ class StudentManager:
             return [], [], None
 
         def score_key(item: Dict) -> Tuple[int, float]:
-            """Provide a stable sort key using score values with graceful fallbacks."""
+            """为排序提供稳定的得分键值。
+
+            参数:
+                item: 单条作业记录字典。
+
+            返回:
+                由优先级和得分组成的排序键元组。
+            """
             score = item.get("score")
             try:
                 return (0, float(score))
@@ -733,7 +940,14 @@ class StudentManager:
         return history_records, trimmed_history, latest_ts
 
     def _resolve_recommendation_reasons(self, student: Dict) -> List[str]:
-        """Determine knowledge points for recommendations, refreshing reports when required."""
+        """基于学生数据确定推荐所需的知识点列表。
+
+        参数:
+            student: 学生信息字典。
+
+        返回:
+            经过筛选的知识点列表。
+        """
         student_id = student.get("student_id")
         if not student_id:
             return []
@@ -761,7 +975,15 @@ class StudentManager:
         student_id: str,
         current_user_id: Optional[int] = None,
     ) -> List[Dict]:
-        """Aggregate recommended questions based on a student's weakest knowledge points."""
+        """汇总学生薄弱知识点并生成题目推荐。
+
+        参数:
+            student_id: 学生编号。
+            current_user_id: 当前用户 ID，必须提供。
+
+        返回:
+            推荐题目的列表，每项包含题目信息与推荐理由。
+        """
 
         if current_user_id is None:
             raise ValueError("生成推荐需要提供用户ID")

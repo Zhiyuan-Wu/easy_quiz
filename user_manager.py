@@ -15,7 +15,7 @@ class UserManager:
         """
         初始化用户管理器
         
-        Args:
+        参数:
             db_path: 用户数据库文件路径
         """
         self.db_path = db_path
@@ -47,10 +47,10 @@ class UserManager:
         """
         对密码进行哈希
         
-        Args:
+        参数:
             password: 明文密码
             
-        Returns:
+        返回:
             哈希后的密码
         """
         return hashlib.sha256(password.encode('utf-8')).hexdigest()
@@ -59,12 +59,12 @@ class UserManager:
         """
         注册新用户
         
-        Args:
+        参数:
             username: 用户名
             password: 密码
             email: 邮箱（可选）
             
-        Returns:
+        返回:
             (success, message)
         """
         if not username or len(username) < 3:
@@ -102,11 +102,11 @@ class UserManager:
         """
         验证用户登录
         
-        Args:
+        参数:
             username: 用户名
             password: 密码
             
-        Returns:
+        返回:
             用户信息字典，如果验证失败返回None
         """
         conn = sqlite3.connect(self.db_path)
@@ -138,10 +138,10 @@ class UserManager:
         """
         根据ID获取用户信息
         
-        Args:
+        参数:
             user_id: 用户ID
             
-        Returns:
+        返回:
             用户信息字典，如果不存在返回None
         """
         conn = sqlite3.connect(self.db_path)
@@ -172,10 +172,10 @@ class UserManager:
         """
         根据用户名获取用户信息
         
-        Args:
+        参数:
             username: 用户名
             
-        Returns:
+        返回:
             用户信息字典，如果不存在返回None
         """
         conn = sqlite3.connect(self.db_path)

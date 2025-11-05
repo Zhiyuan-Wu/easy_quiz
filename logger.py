@@ -16,7 +16,7 @@ class SystemLogger:
         """
         初始化日志记录器
         
-        Args:
+        参数:
             log_file: 日志文件路径
         """
         self.log_file = log_file

@@ -7,7 +7,14 @@ from question_manager import QuestionManager
 
 @pytest.fixture()
 def temp_question_manager(tmp_path):
-    """构造使用临时数据库的QuestionManager实例。"""
+    """构造使用临时数据库的 QuestionManager 实例。
+
+    参数:
+        tmp_path: Pytest 提供的临时目录路径。
+
+    返回:
+        初始化好的 QuestionManager 对象。
+    """
     db_path = tmp_path / "questions.db"
     manager = QuestionManager(db_path=str(db_path))
 
@@ -20,7 +27,11 @@ def temp_question_manager(tmp_path):
 
 
 def test_add_question_defaults_to_solution_type(temp_question_manager):
-    """默认情况下新增题目应当归类为解答题。"""
+    """默认情况下新增题目应当归类为解答题。
+
+    参数:
+        temp_question_manager: QuestionManager 测试实例。
+    """
     manager = temp_question_manager
     question_id = manager.add_question(
         latex_content=r"1+1=2",
@@ -36,7 +47,11 @@ def test_add_question_defaults_to_solution_type(temp_question_manager):
 
 
 def test_add_question_respects_explicit_type(temp_question_manager):
-    """显式指定题型时应保留用户提供的类型。"""
+    """显式指定题型时应保留用户提供的类型。
+
+    参数:
+        temp_question_manager: QuestionManager 测试实例。
+    """
     manager = temp_question_manager
     question_id = manager.add_question(
         latex_content=r"\\frac{1}{2} + \\frac{1}{3} = ?",
@@ -53,7 +68,12 @@ def test_add_question_respects_explicit_type(temp_question_manager):
 
 
 def test_embedding_cache_round_trip(temp_question_manager, tmp_path):
-    """验证embedding缓存的保存与重新加载流程。"""
+    """验证 embedding 缓存的保存与重新加载流程。
+
+    参数:
+        temp_question_manager: QuestionManager 测试实例。
+        tmp_path: Pytest 提供的临时目录路径。
+    """
     manager = temp_question_manager
     embed_path = Path(manager.embedding_cache_path)
     assert embed_path.exists()
