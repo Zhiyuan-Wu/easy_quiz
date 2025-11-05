@@ -49,32 +49,27 @@ class ExportRenderer:
     """导出渲染器类"""
     
     def __init__(self, upload_folder: str = "uploads"):
-        """
-        初始化导出渲染器
-        
-        Args:
-            upload_folder: 上传文件夹路径
+        """初始化导出渲染器。
+
+        参数:
+            upload_folder: 上传文件夹路径。
+
+        返回:
+            None。
         """
         self.upload_folder = upload_folder
     
     def render_latex(self, questions: List[Dict], mode: str, title: str, return_metadata: bool = False):
-        """
-        生成LaTeX格式试卷
-        
-        Args:
-            questions: 题目列表
-            mode: 导出模式 (questions/with-answers)
-            title: 试卷标题
-            return_metadata: 是否返回元数据（输出目录、依赖文件等）
-            
-        Returns:
-            LaTeX内容字符串，或者如果return_metadata=True，返回(latex_content, metadata)元组
-            metadata包含: {
-                'output_dir': 输出目录路径,
-                'cls_file': cls文件路径,
-                'tex_file': tex文件路径,
-                'image_files': 图片文件列表（文件名到完整路径的映射）
-            }
+        """生成 LaTeX 格式的试卷内容。
+
+        参数:
+            questions: 题目列表。
+            mode: 导出模式（`questions` 或 `with-answers`）。
+            title: 试卷标题。
+            return_metadata: 是否返回额外的文件元数据。
+
+        返回:
+            当 `return_metadata` 为 False 时返回 LaTeX 字符串；否则返回 `(latex_content, metadata)` 元组，其中 metadata 包含输出目录及依赖文件信息。
         """
         if not os.path.exists(LATEX_TEMPLATE_PATH):
             raise FileNotFoundError(f"未找到LaTeX模板文件: {LATEX_TEMPLATE_PATH}")
@@ -157,16 +152,15 @@ class ExportRenderer:
         return latex_content
     
     def render_docx(self, questions: List[Dict], mode: str, title: str) -> str:
-        """
-        生成Word格式试卷
+        """生成 Word 格式的试卷文件。
 
-        Args:
-            questions: 题目列表
-            mode: 导出模式 (questions/with-answers)
-            title: 试卷标题
+        参数:
+            questions: 题目列表。
+            mode: 导出模式（`questions` 或 `with-answers`）。
+            title: 试卷标题。
 
-        Returns:
-            文件路径
+        返回:
+            生成的 DOCX 文件路径字符串。
         """
         doc = Document()
 
@@ -290,16 +284,15 @@ class ExportRenderer:
         return file_path
 
     def render_pdf(self, questions: List[Dict], mode: str, title: str) -> str:
-        """
-        生成PDF格式试卷（通过LaTeX编译API）
-        
-        Args:
-            questions: 题目列表
-            mode: 导出模式 (questions/with-answers)
-            title: 试卷标题
-            
-        Returns:
-            文件路径
+        """生成 PDF 格式试卷（通过 LaTeX 编译服务）。
+
+        参数:
+            questions: 题目列表。
+            mode: 导出模式（`questions` 或 `with-answers`）。
+            title: 试卷标题。
+
+        返回:
+            生成的 PDF 文件路径字符串。
         """
         # 首先生成LaTeX内容和元数据
         latex_content, metadata = self.render_latex(questions, mode, title, return_metadata=True)
@@ -350,6 +343,18 @@ class ExportRenderer:
 
     def _build_question_block(self, question: Dict, index: int, mode: str, output_dir: str,
                               copied_images: Dict[str, str]) -> str:
+        """构建单道题目的 LaTeX 片段。
+
+        参数:
+            question: 题目信息字典。
+            index: 题目序号。
+            mode: 导出模式。
+            output_dir: 输出目录路径。
+            copied_images: 已复制图片的映射表。
+
+        返回:
+            对应题目的 LaTeX 文本。
+        """
         latex_body = question.get('latex_content', '') or ''
         latex_body = self._convert_enumerate_to_choices(latex_body)
 
@@ -399,12 +404,28 @@ class ExportRenderer:
         return "\n".join(part for part in parts if part)
 
     def _normalize_question_type(self, question: Dict) -> str:
+        """将题目类型标准化为受支持的类别。
+
+        参数:
+            question: 题目信息字典。
+
+        返回:
+            标准化后的题目类型字符串。
+        """
         q_type = (question.get('question_type') or '').strip()
         if q_type not in TYPE_SETTINGS:
             q_type = DEFAULT_QUESTION_TYPE
         return q_type
 
     def _group_questions_by_type(self, questions: List[Dict]) -> List[tuple]:
+        """按照配置顺序对题目按类型分组。
+
+        参数:
+            questions: 题目列表。
+
+        返回:
+            包含 (题型, 题目列表) 的元组列表。
+        """
         grouped = {question_type: [] for question_type in TYPE_SEQUENCE}
         for question in questions:
             normalized = self._normalize_question_type(question)
@@ -413,6 +434,15 @@ class ExportRenderer:
         return [(question_type, grouped.get(question_type, [])) for question_type in TYPE_SEQUENCE]
 
     def _format_section_title(self, question_type: str, count: int) -> str:
+        """根据题型生成分组标题。
+
+        参数:
+            question_type: 题型名称。
+            count: 该题型题目数量。
+
+        返回:
+            格式化后的分组标题字符串。
+        """
         settings = TYPE_SETTINGS.get(question_type, TYPE_SETTINGS[DEFAULT_QUESTION_TYPE])
         score = settings.get('score', 0)
         total = score * count if score else count
@@ -424,6 +454,14 @@ class ExportRenderer:
         )
 
     def _convert_enumerate_to_choices(self, content: str) -> str:
+        """将 enumerate 环境转换为 choices 环境。
+
+        参数:
+            content: 原始 LaTeX 文本。
+
+        返回:
+            转换后的文本。
+        """
         if not content:
             return ''
         processed = re.sub(r'\\begin\{enumerate\}(\[[^\]]*\])?', r'\\begin{choices}\1', content)
@@ -433,7 +471,18 @@ class ExportRenderer:
         return processed
 
     def _copy_image_to_output(self, image_path: str, output_dir: str,
-                               copied_images: Dict[str, str], index: int) -> str:
+                                 copied_images: Dict[str, str], index: int) -> str:
+        """复制图片到输出目录并返回新文件名。
+
+        参数:
+            image_path: 原始图片路径。
+            output_dir: 导出目录。
+            copied_images: 已复制图片映射。
+            index: 题目序号。
+
+        返回:
+            新图片文件名，若复制失败返回空字符串。
+        """
         if not image_path:
             return ''
 
@@ -468,11 +517,11 @@ class ExportRenderer:
         """
         清理LaTeX内容，确保格式正确
         
-        Args:
-            content: 原始内容
+        参数:
+            content: 原始 LaTeX 内容。
             
-        Returns:
-            清理后的LaTeX内容
+        返回:
+            清理后的 LaTeX 内容字符串。
         """
         if not content:
             return ""
@@ -497,11 +546,11 @@ class ExportRenderer:
         """
         将LaTeX内容转换为可读文本（用于Word文档）
         
-        Args:
-            latex_content: LaTeX内容
+        参数:
+            latex_content: LaTeX 内容字符串。
             
-        Returns:
-            可读文本
+        返回:
+            转换后的可读文本。
         """
         if not latex_content:
             return ""
@@ -532,6 +581,14 @@ class ExportRenderer:
         return content.strip()
 
     def _resolve_docx_image_path(self, image_path: str) -> Optional[str]:
+        """将图片路径解析为可用于 DOCX 的绝对路径。
+
+        参数:
+            image_path: 图片路径字符串。
+
+        返回:
+            可用的绝对路径；若不可用则返回 None。
+        """
         if not image_path:
             return None
 
@@ -555,6 +612,16 @@ class ExportRenderer:
         return None
 
     def _append_text_lines(self, container, lines: List[str], bullet_style: str = 'List Bullet') -> None:
+        """向 docx 容器追加文本行并处理项目符号。
+
+        参数:
+            container: docx 段落或单元格对象。
+            lines: 待写入的文本行列表。
+            bullet_style: 项目符号样式名称。
+
+        返回:
+            None。
+        """
         is_table_cell = hasattr(container, '_tc')
         existing_paragraphs = list(getattr(container, 'paragraphs', [])) if is_table_cell else []
         first_paragraph = existing_paragraphs[0] if existing_paragraphs else None
@@ -579,6 +646,15 @@ class ExportRenderer:
             paragraph.paragraph_format.space_after = Pt(6)
 
     def _add_images_to_cell(self, cell, image_paths: List[str]) -> None:
+        """按顺序将图片插入到表格单元格内。
+
+        参数:
+            cell: docx 单元格对象。
+            image_paths: 图片路径列表。
+
+        返回:
+            None。
+        """
         existing_paragraphs = list(getattr(cell, 'paragraphs', []))
         first_paragraph = existing_paragraphs[0] if existing_paragraphs else None
 
@@ -601,6 +677,14 @@ class ExportRenderer:
             paragraph.paragraph_format.space_after = Pt(6)
 
     def _remove_table_borders(self, table) -> None:
+        """移除 docx 表格的所有边框。
+
+        参数:
+            table: docx 表格对象。
+
+        返回:
+            None。
+        """
         tbl = table._tbl
         tbl_pr = tbl.get_or_add_tblPr()
         tbl_borders = tbl_pr.find(qn('w:tblBorders'))
@@ -615,12 +699,14 @@ class ExportRenderer:
         tbl_pr.append(tbl_borders)
     
     def _add_mathml_to_paragraph(self, paragraph, latex_math: str):
-        """
-        将LaTeX数学公式转换为MathML并添加到段落中
-        
-        Args:
-            paragraph: Word段落对象
-            latex_math: LaTeX数学公式
+        """将 LaTeX 数学公式转换为 MathML 并插入段落。
+
+        参数:
+            paragraph: Word 段落对象。
+            latex_math: LaTeX 数学公式字符串。
+
+        返回:
+            None。
         """
         if not LATEX2MATHML_AVAILABLE or not latex_math:
             return

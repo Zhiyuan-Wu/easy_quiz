@@ -6,6 +6,11 @@ BASE_URL = "http://127.0.0.1:5001"
 
 
 def test_web_server_healthcheck():
+    """确认 Web 服务端点能够响应健康检查请求。
+
+    返回:
+        None。
+    """
     try:
         response = requests.get(f"{BASE_URL}/api/auth/current", timeout=3)
     except requests.ConnectionError as exc:

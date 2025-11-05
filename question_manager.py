@@ -31,6 +31,14 @@ DEFAULT_QUESTION_TYPE = "解答题"
 
 
 def _sanitize_question_type(value: Optional[str]) -> str:
+    """标准化题目类型值为受支持的选项之一。
+
+    参数:
+        value: 原始题目类型字符串，可能为 None。
+
+    返回:
+        合法的题目类型字符串。
+    """
     if isinstance(value, str):
         question_type = value.strip() or DEFAULT_QUESTION_TYPE
     else:
@@ -40,15 +48,17 @@ def _sanitize_question_type(value: Optional[str]) -> str:
     return question_type
 
 class QuestionManager:
-    """高考题目管理器类"""
+    """高考题目管理器类。"""
     
     def __init__(self, db_path: str = DATABASE_PATH, system_manager=None):
-        """
-        初始化题目管理器
-        
-        Args:
-            db_path: 数据库文件路径
-            system_manager: 系统管理器实例
+        """初始化题目管理器。
+
+        参数:
+            db_path: 题目数据库文件路径。
+            system_manager: 系统管理器实例，可为 None。
+
+        返回:
+            None。
         """
         self.db_path = db_path
         self.system_manager = system_manager
@@ -70,7 +80,11 @@ class QuestionManager:
         self._processing_question_ids = set()  # 正在计算embedding的question_id集合
     
     def init_database(self):
-        """初始化数据库表结构"""
+        """初始化题目数据库表结构。
+
+        返回:
+            None。
+        """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -113,7 +127,11 @@ class QuestionManager:
         conn.close()
     
     def _ensure_embedding_store(self):
-        """确保embedding缓存存储结构存在"""
+        """确保 embedding 缓存存储结构存在。
+
+        返回:
+            None。
+        """
         conn = sqlite3.connect(self.embedding_cache_path)
         try:
             cursor = conn.cursor()
@@ -131,7 +149,11 @@ class QuestionManager:
             conn.close()
 
     def _load_embedding_cache(self):
-        """加载embedding缓存"""
+        """加载 embedding 缓存内容。
+
+        返回:
+            question_id 到 embedding 向量的映射字典。
+        """
         cache = {}
         try:
             conn = sqlite3.connect(self.embedding_cache_path)
@@ -149,7 +171,15 @@ class QuestionManager:
         return cache
     
     def _save_embedding_to_cache(self, question_id: int, embedding: List[float]):
-        """保存或更新embedding到缓存存储"""
+        """保存或更新 embedding 数据。
+
+        参数:
+            question_id: 题目 ID。
+            embedding: 题目对应的向量列表。
+
+        返回:
+            None。
+        """
         try:
             conn = sqlite3.connect(self.embedding_cache_path)
             cursor = conn.cursor()
@@ -171,11 +201,26 @@ class QuestionManager:
             self.logger.log_error(e, f"保存embedding缓存失败 - question_id: {question_id}")
 
     def _get_detailed_instruct(self, task_description: str, query: str) -> str:
-        """获取带指令的查询文本"""
+        """构造包含任务描述的查询文本。
+
+        参数:
+            task_description: 任务描述文本。
+            query: 用户查询内容。
+
+        返回:
+            带指令的查询字符串。
+        """
         return f'Instruct: {task_description}\nQuery:{query}'
     
     def _get_question_text(self, question: Dict) -> str:
-        """获取题目的完整文本（来源+标签+题目+解答）"""
+        """拼接题目的完整文本内容。
+
+        参数:
+            question: 题目信息字典。
+
+        返回:
+            包含来源、标签、题面和参考答案的文本。
+        """
         parts = []
         if question.get('source'):
             parts.append(question['source'])
@@ -188,7 +233,15 @@ class QuestionManager:
         return ' '.join(parts)
     
     def _compute_cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """计算余弦相似度"""
+        """计算两个向量的余弦相似度。
+
+        参数:
+            vec1: 向量 1。
+            vec2: 向量 2。
+
+        返回:
+            余弦相似度数值。
+        """
         vec1 = np.array(vec1)
         vec2 = np.array(vec2)
         dot_product = np.dot(vec1, vec2)
@@ -199,8 +252,21 @@ class QuestionManager:
         return float(dot_product / (norm1 * norm2))
     
     def _compute_missing_embeddings_async(self, question_ids: List[int], current_user_id: int = None):
-        """异步计算缺失的embedding"""
+        """异步计算缺失的 embedding 向量。
+
+        参数:
+            question_ids: 待补齐 embedding 的题目 ID 列表。
+            current_user_id: 当前用户 ID，可为 None。
+
+        返回:
+            None。
+        """
         def compute_task():
+            """后台线程任务：加载题目、计算 embedding 并更新缓存。
+
+            返回:
+                None。
+            """
             processed_ids = set()  # 记录成功处理的question_id
             try:
                 conn = sqlite3.connect(self.db_path)
@@ -256,18 +322,20 @@ class QuestionManager:
                     reference_answer: str = None, source: str = None, 
                     image: List[str] = None, user_id: int = None, 
                     visibility: str = 'public', question_type: str = '解答题') -> int:
-        """
-        添加题目到数据库
-        
-        Args:
-            latex_content: LaTeX格式的题目内容
-            tags: 题目标签列表
-            reference_answer: 参考解答
-            source: 题目来源
-            image: 图片路径列表
-            
-        Returns:
-            新插入题目的ID
+        """将题目写入数据库。
+
+        参数:
+            latex_content: LaTeX 格式的题目内容。
+            tags: 题目标签列表，可选。
+            reference_answer: 参考解答文本，可选。
+            source: 题目来源说明，可选。
+            image: 图片路径列表，可选。
+            user_id: 上传题目的用户 ID，可选。
+            visibility: 可见范围，默认 public。
+            question_type: 题目类型，默认“解答题”。
+
+        返回:
+            新插入题目的 ID。
         """
         start_time = time.time()
         
@@ -320,7 +388,18 @@ class QuestionManager:
     def update_question(self, question_id: int, latex_content: str,
                         reference_answer: Optional[str], current_user_id: int,
                         question_type: Optional[str] = None) -> Optional[Dict]:
-        """更新题目信息并刷新对应的embedding"""
+        """更新题目内容并刷新对应的 embedding。
+
+        参数:
+            question_id: 题目 ID。
+            latex_content: 更新后的题目内容。
+            reference_answer: 更新后的参考答案，可为 None。
+            current_user_id: 当前用户 ID。
+            question_type: 更新后的题目类型，可为 None。
+
+        返回:
+            更新后的题目字典；若题目不存在则返回 None。
+        """
         if not latex_content or not latex_content.strip():
             raise ValueError("题目内容不能为空")
 
@@ -378,15 +457,14 @@ class QuestionManager:
         return updated_question
 
     def get_questions_by_tags(self, tags: List[str], current_user_id: int = None) -> List[Dict]:
-        """
-        根据标签查询题目（考虑可见性）
-        
-        Args:
-            tags: 要查询的标签列表
-            current_user_id: 当前用户ID
-            
-        Returns:
-            匹配的题目列表
+        """按标签查询题目（包含可见性过滤）。
+
+        参数:
+            tags: 需要匹配的标签列表。
+            current_user_id: 当前用户 ID，可为 None。
+
+        返回:
+            匹配的题目字典列表。
         """
         if not tags:
             return []
@@ -421,15 +499,14 @@ class QuestionManager:
         return questions
     
     def get_question_by_id(self, question_id: int, current_user_id: int = None) -> Optional[Dict]:
-        """
-        根据ID获取题目详情（考虑可见性）
-        
-        Args:
-            question_id: 题目ID
-            current_user_id: 当前用户ID
-            
-        Returns:
-            题目信息字典，如果不存在或无权访问返回None
+        """根据 ID 获取题目详情（含可见性判断）。
+
+        参数:
+            question_id: 题目 ID。
+            current_user_id: 当前用户 ID，可为 None。
+
+        返回:
+            题目信息字典；若不存在或无权访问则返回 None。
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -447,15 +524,14 @@ class QuestionManager:
     
     
     def auto_tag_and_answer(self, content: str, source: str = None) -> Tuple[List[str], str, str, str]:
-        """
-        使用大语言模型自动打标、生成参考解答并格式化为LaTeX
-        
-        Args:
-            content: 题目内容（可能是普通文本或LaTeX格式）
-            source: 题目来源
-            
-        Returns:
-            (标签列表, 参考解答, LaTeX格式的题目内容, 题目类型)
+        """使用大模型为题目自动打标并生成解答与 LaTeX。
+
+        参数:
+            content: 原始题目内容。
+            source: 题目来源，可为 None。
+
+        返回:
+            (标签列表, 参考解答, LaTeX 内容, 题目类型) 四元组。
         """
         start_time = time.time()
         
@@ -492,9 +568,7 @@ class QuestionManager:
             # 调用大语言模型API
             response = self.llm_client.chat.completions.create(
                 model=LLM_CONFIG["model"],
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=LLM_CONFIG["max_tokens"],
-                temperature=LLM_CONFIG["temperature"]
+                messages=[{"role": "user", "content": prompt}]
             )
             response = response.choices[0].message.content
             
@@ -540,7 +614,14 @@ class QuestionManager:
             return [], "自动生成解答失败，请手动输入", content, '解答题'
 
     def generate_question_variant(self, question: Dict) -> Dict:
-        """基于原题生成微调后的题目变体"""
+        """基于原题生成微调后的题目变体。
+
+        参数:
+            question: 原始题目信息字典。
+
+        返回:
+            新生成的题目信息字典。
+        """
         if not question:
             raise ValueError('题目信息缺失，无法生成变体')
 
@@ -588,9 +669,7 @@ class QuestionManager:
 
         response = self.llm_client.chat.completions.create(
             model=LLM_CONFIG["model"],
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=LLM_CONFIG["max_tokens"],
-            temperature=LLM_CONFIG["temperature"]
+            messages=[{"role": "user", "content": prompt}]
         )
         content = response.choices[0].message.content
 
@@ -617,15 +696,14 @@ class QuestionManager:
         }
     
     def parse_exam_paper(self, markdown_content: str, image_filename_mapping: Dict[str, str] = None) -> List[Dict]:
-        """
-        解析试卷内容，提取题目
-        
-        Args:
-            markdown_content: OCR识别的markdown内容
-            image_filename_mapping: 图片文件名映射关系 {原始文件名: 本地路径}
-            
-        Returns:
-            解析出的题目列表
+        """解析试卷内容并提取题目结构。
+
+        参数:
+            markdown_content: OCR 识别得到的 Markdown 内容。
+            image_filename_mapping: 图片文件名到本地路径的映射，可为 None。
+
+        返回:
+            解析出的题目字典列表。
         """
         start_time = time.time()
         
@@ -676,9 +754,7 @@ class QuestionManager:
             # 调用大语言模型API
             response = self.llm_client.chat.completions.create(
                 model=LLM_CONFIG["model"],
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=LLM_CONFIG["max_tokens"],
-                temperature=LLM_CONFIG["temperature"]
+                messages=[{"role": "user", "content": prompt}]
             )
             response = response.choices[0].message.content
             
@@ -747,15 +823,14 @@ class QuestionManager:
             return []
     
     def delete_question(self, question_id: int, current_user_id: int = None) -> bool:
-        """
-        删除题目（只能删除自己的题目）
-        
-        Args:
-            question_id: 题目ID
-            current_user_id: 当前用户ID
-            
-        Returns:
-            是否删除成功
+        """删除题目，仅允许删除自己的题目。
+
+        参数:
+            question_id: 题目 ID。
+            current_user_id: 当前用户 ID。
+
+        返回:
+            删除成功返回 True，否则返回 False。
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -771,16 +846,15 @@ class QuestionManager:
             conn.close()
     
     def get_all_questions(self, limit: int = 100, offset: int = 0, current_user_id: int = None) -> List[Dict]:
-        """
-        获取所有题目（分页，考虑可见性）
-        
-        Args:
-            limit: 每页数量
-            offset: 偏移量
-            current_user_id: 当前用户ID
-            
-        Returns:
-            题目列表
+        """分页获取题目列表（含可见性过滤）。
+
+        参数:
+            limit: 每页条目数量。
+            offset: 偏移量。
+            current_user_id: 当前用户 ID，可为 None。
+
+        返回:
+            题目字典列表。
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -803,16 +877,15 @@ class QuestionManager:
         return questions
     
     def search_questions(self, keyword: str, current_user_id: int = None, k: int = 10) -> List[Dict]:
-        """
-        根据关键词搜索题目（考虑可见性），结合关键词搜索和embedding召回
-        
-        Args:
-            keyword: 搜索关键词
-            current_user_id: 当前用户ID
-            k: embedding搜索返回的最相似题目数量
-            
-        Returns:
-            匹配的题目列表（合并了关键词搜索和embedding搜索的结果）
+        """结合关键词与 embedding 召回搜索题目。
+
+        参数:
+            keyword: 搜索关键词。
+            current_user_id: 当前用户 ID，可为 None。
+            k: embedding 搜索返回的数量上限。
+
+        返回:
+            匹配题目的字典列表，包含排序得分。
         """
         # 1. 关键词搜索
         conn = sqlite3.connect(self.db_path)
@@ -830,6 +903,7 @@ class QuestionManager:
             rows = cursor.fetchall()
             for row in rows:
                 question = self._row_to_dict(row)
+                question['ranking_score'] = 0.0
                 keyword_questions.append(question)
         
         # 2. 获取所有可见题目
@@ -888,26 +962,25 @@ class QuestionManager:
                             # 使用faiss搜索top k个最相似的embedding
                             k_search = min(k * 2, len(visible_embeddings))
                             distances, indices = temp_index.search(query_embedding_array, k_search)
-                            
-                            # 将L2距离转换为相似度分数
-                            similarities = []
-                            similarity_map = {}  # question_id -> similarity，用于后续排序
+
+                            embedding_candidates: List[Dict] = []
                             visible_question_dict = {q['id']: q for q in all_visible_questions}
-                            
+
                             for idx, dist in zip(indices[0], distances[0]):
                                 if idx < len(visible_question_id_list):
                                     question_id = visible_question_id_list[idx]
                                     if question_id in visible_question_dict:
-                                        # L2距离转换为相似度（使用负距离，越小越好）
                                         similarity = -float(dist)
                                         question = visible_question_dict[question_id]
-                                        similarities.append((similarity, question))
-                                        similarity_map[question_id] = similarity
-                            
-                            # 按相似度排序，取top k
-                            similarities.sort(key=lambda x: x[0], reverse=True)
-                            embedding_questions = [q for _, q in similarities[:k]]
-                            embedding_similarity_map = similarity_map  # 保存similarity映射
+                                        question_with_score = dict(question)
+                                        question_with_score['ranking_score'] = similarity
+                                        embedding_candidates.append(question_with_score)
+                                        embedding_similarity_map[question_id] = similarity
+
+                            embedding_candidates.sort(
+                                key=lambda item: item.get('ranking_score', 0.0), reverse=True
+                            )
+                            embedding_questions = embedding_candidates[:k]
                         except Exception as e:
                             self.logger.log_error(e, "Faiss搜索失败")
                             embedding_questions = []
@@ -921,7 +994,12 @@ class QuestionManager:
             result_dict[question['id']] = question
         
         for question in embedding_questions:
-            if question['id'] not in result_dict:
+            existing = result_dict.get(question['id'])
+            if existing:
+                existing_score = existing.get('ranking_score', 0.0)
+                new_score = question.get('ranking_score', 0.0)
+                existing['ranking_score'] = max(existing_score, new_score)
+            else:
                 result_dict[question['id']] = question
         
         # 5. 如果有缺失的embedding，启动异步任务计算
@@ -948,6 +1026,14 @@ class QuestionManager:
         embedding_question_ids = {q['id'] for q in embedding_questions}
         
         def sort_key(q):
+            """根据命中来源与相似度对题目排序。
+
+            参数:
+                q: 题目信息字典。
+
+            返回:
+                用于排序的元组。
+            """
             q_id = q['id']
             in_keyword = q_id in keyword_question_ids
             in_embedding = q_id in embedding_question_ids
@@ -968,14 +1054,13 @@ class QuestionManager:
         return results
     
     def get_question_stats(self, current_user_id: int = None) -> Dict:
-        """
-        获取题目统计信息
-        
-        Args:
-            current_user_id: 当前用户ID
-            
-        Returns:
-            统计信息字典
+        """获取题目统计信息。
+
+        参数:
+            current_user_id: 当前用户 ID，可为 None。
+
+        返回:
+            包含总题量与个人题量的字典。
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -999,7 +1084,14 @@ class QuestionManager:
         }
     
     def _row_to_dict(self, row) -> Dict:
-        """将数据库行转换为字典"""
+        """将数据库行转换为题目字典。
+
+        参数:
+            row: sqlite 行数据。
+
+        返回:
+            题目信息字典，若行为空则返回 None。
+        """
         if not row:
             return None
         
@@ -1015,6 +1107,15 @@ class QuestionManager:
         
         # 安全地获取列值，处理可能不存在的列
         def get_column_value(column_name, default=None):
+            """安全获取指定列的值。
+
+            参数:
+                column_name: 列名。
+                default: 获取失败时使用的默认值。
+
+            返回:
+                目标列的值或默认值。
+            """
             if column_name in column_map:
                 idx = column_map[column_name]
                 if idx < len(row):

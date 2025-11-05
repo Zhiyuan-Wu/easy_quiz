@@ -47,6 +47,11 @@ RESULT_BASE.mkdir(exist_ok=True)
 # ✅ 新增：根路径，用于服务状态检查
 @app.route('/', methods=['GET'])
 def home():
+    """返回 OCR 服务的运行状态页面。
+
+    返回:
+        包含简单 HTML 状态信息的响应二元组。
+    """
     return """
     <h2>✅ DeepSeek-OCR Service is Running!</h2>
     <p>Use <code>POST /ocr</code> with a PNG/JPG file to perform OCR.</p>
@@ -56,6 +61,11 @@ def home():
 # OCR 接口
 @app.route('/ocr', methods=['POST'])
 def ocr_endpoint():
+    """处理图片上传，执行 OCR 并返回结果。
+
+    返回:
+        Flask JSON 响应，包含 OCR 结果或错误信息。
+    """
     if 'file' not in request.files:
         return jsonify({"error": "No file provided"}), 400
 
