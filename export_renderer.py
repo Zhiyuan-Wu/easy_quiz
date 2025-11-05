@@ -220,11 +220,8 @@ class ExportRenderer:
                 question_heading.paragraph_format.space_after = Pt(2)
 
                 latex_content = question.get('latex_content', '') or ''
-                readable_content = self._latex_to_readable(latex_content)
-                normalized_content = (readable_content or '').replace('• ', '\n• ')
-                content_lines = [line.strip() for line in normalized_content.split('\n') if line.strip()]
-                if not content_lines:
-                    content_lines = ['（本题内容暂缺）']
+                if not latex_content.strip():
+                    latex_content = '（本题内容暂缺）'
 
                 resolved_images = []
                 for img_path in question.get('image') or []:
@@ -247,10 +244,12 @@ class ExportRenderer:
                     left_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
                     right_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
 
-                    self._append_text_lines(left_cell, content_lines)
+                    # 使用新的方法处理包含公式的内容
+                    self._append_latex_content(left_cell, latex_content)
                     self._add_images_to_cell(right_cell, resolved_images)
                 else:
-                    self._append_text_lines(doc, content_lines)
+                    # 使用新的方法处理包含公式的内容
+                    self._append_latex_content(doc, latex_content)
 
                 reference_answer = question.get('reference_answer', '') or ''
                 if mode == 'with-answers' and reference_answer.strip():
@@ -267,12 +266,10 @@ class ExportRenderer:
                     answer_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
                     answer_cell.text = ''
 
-                    readable_answer = self._latex_to_readable(reference_answer)
-                    normalized_answer = (readable_answer or '').replace('• ', '\n• ')
-                    answer_lines = [line.strip() for line in normalized_answer.split('\n') if line.strip()]
-                    if not answer_lines:
-                        answer_lines = ['（本题内容暂缺）']
-                    self._append_text_lines(answer_cell, answer_lines)
+                    # 使用新的方法处理包含公式的答案内容
+                    if not reference_answer.strip():
+                        reference_answer = '（本题内容暂缺）'
+                    self._append_latex_content(answer_cell, reference_answer)
 
                 doc.add_paragraph()
                 current_index += 1
@@ -542,41 +539,372 @@ class ExportRenderer:
         
         return content.strip()
     
-    def _latex_to_readable(self, latex_content: str) -> str:
+    def _parse_latex_content(self, latex_content: str) -> List[Dict]:
         """
-        将LaTeX内容转换为可读文本（用于Word文档）
+        解析LaTeX内容，将其分割为文本片段和公式片段
         
         参数:
             latex_content: LaTeX 内容字符串。
             
         返回:
-            转换后的可读文本。
+            包含 {'type': 'text'/'formula'/'display_formula', 'content': ...} 的列表。
+        """
+        if not latex_content:
+            return []
+        
+        parts = []
+        last_pos = 0
+        i = 0
+        content_len = len(latex_content)
+        
+        while i < content_len:
+            # 先尝试匹配块级公式 \[...\]
+            if latex_content[i:].startswith('\\['):
+                # 找到对应的结束标记
+                end_pos = latex_content.find('\\]', i + 2)
+                if end_pos != -1:
+                    # 添加前面的文本
+                    before = latex_content[last_pos:i].strip()
+                    if before:
+                        parts.append({'type': 'text', 'content': before})
+                    
+                    # 添加公式
+                    formula = latex_content[i + 2:end_pos].strip()
+                    parts.append({'type': 'display_formula', 'content': formula})
+                    
+                    last_pos = end_pos + 2
+                    i = last_pos
+                    continue
+            
+            # 尝试匹配块级公式 $$...$$
+            if latex_content[i:].startswith('$$'):
+                # 找到对应的结束标记
+                end_pos = latex_content.find('$$', i + 2)
+                if end_pos != -1:
+                    # 添加前面的文本
+                    before = latex_content[last_pos:i].strip()
+                    if before:
+                        parts.append({'type': 'text', 'content': before})
+                    
+                    # 添加公式
+                    formula = latex_content[i + 2:end_pos].strip()
+                    parts.append({'type': 'display_formula', 'content': formula})
+                    
+                    last_pos = end_pos + 2
+                    i = last_pos
+                    continue
+            
+            # 尝试匹配内联公式 $...$（但不匹配 $$）
+            if latex_content[i] == '$' and (i + 1 >= content_len or latex_content[i + 1] != '$'):
+                # 找到对应的结束 $
+                end_pos = latex_content.find('$', i + 1)
+                if end_pos != -1:
+                    # 添加前面的文本
+                    before = latex_content[last_pos:i].strip()
+                    if before:
+                        parts.append({'type': 'text', 'content': before})
+                    
+                    # 添加公式
+                    formula = latex_content[i + 1:end_pos].strip()
+                    parts.append({'type': 'formula', 'content': formula})
+                    
+                    last_pos = end_pos + 1
+                    i = last_pos
+                    continue
+            
+            i += 1
+        
+        # 添加剩余的文本
+        if last_pos < content_len:
+            remaining = latex_content[last_pos:].strip()
+            if remaining:
+                parts.append({'type': 'text', 'content': remaining})
+        
+        return parts if parts else [{'type': 'text', 'content': latex_content}]
+    
+    def _add_latex_formula_to_run(self, run, latex_formula: str, is_display: bool = False):
+        """
+        将LaTeX公式添加到Word运行对象中（使用Office Math格式）
+        
+        参数:
+            run: Word运行对象。
+            latex_formula: LaTeX公式字符串。
+            is_display: 是否为块级公式。
+        """
+        if not LATEX2MATHML_AVAILABLE:
+            # 如果latex2mathml不可用，添加原始文本
+            run.add_text(f" [{latex_formula}] ")
+            return
+        
+        try:
+            # 转换LaTeX为MathML
+            mathml_str = latex_to_mathml(latex_formula)
+            
+            # 将MathML转换为Office Math XML
+            omath = self._mathml_to_omath_element(mathml_str)
+            
+            if omath is not None:
+                # 将oMath添加到运行元素
+                run._element.append(omath)
+            else:
+                # 如果转换失败，使用简单文本
+                run.add_text(f" [{latex_formula}] ")
+                
+        except Exception as e:
+            print(f"LaTeX公式转换失败 ({latex_formula[:50] if len(latex_formula) > 50 else latex_formula}...): {e}")
+            # 如果转换失败，添加原始文本
+            run.add_text(f" [{latex_formula}] ")
+    
+    def _mathml_to_omath_element(self, mathml_str: str):
+        """
+        将MathML字符串转换为Office Math XML元素
+        
+        参数:
+            mathml_str: MathML字符串。
+            
+        返回:
+            Office Math XML元素，如果转换失败返回None。
+        """
+        try:
+            import xml.etree.ElementTree as ET
+            import traceback
+            
+            # 清理MathML字符串
+            mathml_clean = mathml_str.strip()
+            
+            # 移除XML声明和命名空间声明（如果存在）
+            if mathml_clean.startswith('<?xml'):
+                mathml_clean = mathml_clean.split('>', 1)[1] if '>' in mathml_clean else mathml_clean
+            
+            # 尝试解析MathML
+            mathml_root = None
+            parse_error = None
+            try:
+                mathml_root = ET.fromstring(mathml_clean)
+            except ET.ParseError as e:
+                parse_error = e
+                # 如果解析失败，尝试添加math标签包装
+                try:
+                    mathml_wrapped = f'<math xmlns="http://www.w3.org/1998/Math/MathML">{mathml_clean}</math>'
+                    mathml_root = ET.fromstring(mathml_wrapped)
+                except Exception as e2:
+                    print(f"MathML解析失败 - 原始MathML: {mathml_clean[:200]}...")
+                    print(f"第一次解析错误: {parse_error}")
+                    print(f"第二次解析错误: {e2}")
+                    print(f"错误类型: {type(e2).__name__}")
+                    import traceback
+                    traceback.print_exc()
+                    return None
+            
+            # 创建Office Math元素
+            # 使用parse_xml创建包含命名空间的元素
+            omath_xml = '<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"></m:oMath>'
+            omath = parse_xml(omath_xml)
+            
+            # 递归转换MathML元素到Office Math
+            def convert_mathml_to_omath(mathml_elem, omath_parent):
+                """递归转换MathML元素"""
+                try:
+                    # 安全地获取标签名
+                    tag_name = mathml_elem.tag
+                    if '}' in tag_name:
+                        tag_name = tag_name.split('}')[-1]
+                    
+                    if tag_name == 'math' or tag_name == 'mrow':
+                        # 处理子元素
+                        for child in mathml_elem:
+                            convert_mathml_to_omath(child, omath_parent)
+                        # 处理文本内容
+                        if mathml_elem.text and mathml_elem.text.strip():
+                            r = OxmlElement('m:r')
+                            t = OxmlElement('m:t')
+                            t.text = mathml_elem.text.strip()
+                            r.append(t)
+                            omath_parent.append(r)
+                    
+                    elif tag_name == 'mi' or tag_name == 'mn' or tag_name == 'mo':
+                        # 数学标识符、数字、运算符
+                        r = OxmlElement('m:r')
+                        t = OxmlElement('m:t')
+                        text = mathml_elem.text or ''
+                        if tag_name == 'mi':
+                            # 标识符使用斜体
+                            rpr = OxmlElement('m:rPr')
+                            i = OxmlElement('m:i')
+                            i.set(qn('m:val'), '1')
+                            rpr.append(i)
+                            r.append(rpr)
+                        if text:
+                            t.text = text.strip()
+                            r.append(t)
+                            omath_parent.append(r)
+                        
+                        # 处理子元素
+                        for child in mathml_elem:
+                            convert_mathml_to_omath(child, omath_parent)
+                    
+                    elif tag_name == 'mfrac':
+                        # 分数
+                        f = OxmlElement('m:f')
+                        num = OxmlElement('m:num')
+                        den = OxmlElement('m:den')
+                        child_count = 0
+                        for child in mathml_elem:
+                            child_tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+                            if child_tag == 'mrow':
+                                for subchild in child:
+                                    convert_mathml_to_omath(subchild, num if child_count == 0 else den)
+                            else:
+                                convert_mathml_to_omath(child, num if child_count == 0 else den)
+                            child_count += 1
+                        f.append(num)
+                        f.append(den)
+                        omath_parent.append(f)
+                    
+                    elif tag_name == 'msup' or tag_name == 'msub' or tag_name == 'msubsup':
+                        # 上标、下标、上下标
+                        if tag_name == 'msup':
+                            func = OxmlElement('m:sSup')
+                            e = OxmlElement('m:e')
+                            sup = OxmlElement('m:sup')
+                        elif tag_name == 'msub':
+                            func = OxmlElement('m:sSub')
+                            e = OxmlElement('m:e')
+                            sub = OxmlElement('m:sub')
+                        else:  # msubsup
+                            func = OxmlElement('m:sSubSup')
+                            e = OxmlElement('m:e')
+                            sub = OxmlElement('m:sub')
+                            sup = OxmlElement('m:sup')
+                        
+                        children = list(mathml_elem)
+                        if children:
+                            convert_mathml_to_omath(children[0], e)
+                            func.append(e)
+                            if len(children) > 1:
+                                convert_mathml_to_omath(children[1], sub if tag_name == 'msub' else sup)
+                                func.append(sub if tag_name == 'msub' else sup)
+                            if len(children) > 2:  # msubsup
+                                convert_mathml_to_omath(children[2], sup)
+                                func.append(sup)
+                        omath_parent.append(func)
+                    
+                    elif tag_name == 'msqrt' or tag_name == 'mroot':
+                        # 根号
+                        if tag_name == 'msqrt':
+                            rad = OxmlElement('m:rad')
+                            deg = None
+                        else:
+                            rad = OxmlElement('m:rad')
+                            deg = OxmlElement('m:deg')
+                            children = list(mathml_elem)
+                            if len(children) > 1:
+                                convert_mathml_to_omath(children[1], deg)
+                        
+                        e = OxmlElement('m:e')
+                        children = list(mathml_elem)
+                        if children:
+                            convert_mathml_to_omath(children[0], e)
+                        rad.append(e)
+                        if deg:
+                            rad.append(deg)
+                        omath_parent.append(rad)
+                    
+                    else:
+                        # 其他元素，递归处理
+                        for child in mathml_elem:
+                            convert_mathml_to_omath(child, omath_parent)
+                        if mathml_elem.text and mathml_elem.text.strip():
+                            r = OxmlElement('m:r')
+                            t = OxmlElement('m:t')
+                            t.text = mathml_elem.text.strip()
+                            r.append(t)
+                            omath_parent.append(r)
+                            
+                except Exception as inner_e:
+                    print(f"转换MathML元素时出错 - 标签: {getattr(mathml_elem, 'tag', 'unknown')}")
+                    print(f"错误类型: {type(inner_e).__name__}")
+                    print(f"错误信息: {inner_e}")
+                    import traceback
+                    traceback.print_exc()
+                    raise
+            
+            # 开始转换
+            convert_mathml_to_omath(mathml_root, omath)
+            
+            # 如果转换后没有内容，返回None
+            if len(omath) == 0:
+                return None
+            
+            return omath
+            
+        except Exception as e:
+            print(f"MathML转换失败")
+            print(f"错误类型: {type(e).__name__}")
+            print(f"错误信息: {e}")
+            print(f"原始MathML (前500字符): {mathml_str[:500] if mathml_str else 'None'}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _create_simple_omath_from_latex(self, latex_or_mathml: str):
+        """
+        从LaTeX或MathML创建简单的Office Math元素（后备方案）
+        
+        参数:
+            latex_or_mathml: LaTeX公式或MathML字符串。
+            
+        返回:
+            Office Math XML元素。
+        """
+        # 使用parse_xml创建包含命名空间的元素
+        omath_xml = '<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"></m:oMath>'
+        omath = parse_xml(omath_xml)
+        
+        # 创建一个简单的文本运行
+        r = OxmlElement('m:r')
+        t = OxmlElement('m:t')
+        # 只取前100个字符，避免过长
+        display_text = latex_or_mathml[:100] if len(latex_or_mathml) > 100 else latex_or_mathml
+        t.text = display_text
+        r.append(t)
+        omath.append(r)
+        
+        return omath
+    
+    def _latex_to_readable(self, latex_content: str) -> str:
+        """
+        将LaTeX内容转换为可读文本（用于Word文档，保留公式标记以便后续处理）
+        
+        参数:
+            latex_content: LaTeX 内容字符串。
+            
+        返回:
+            转换后的可读文本（公式已标记）。
         """
         if not latex_content:
             return ""
         
-        # 移除LaTeX命令，保留基本文本
+        # 处理列表环境，转换为文本格式
         content = latex_content
         
-        # 移除数学公式标记
-        content = re.sub(r'\$([^$]+)\$', r'\1', content)
-        content = re.sub(r'\\\[([^\]]+)\\\]', r'\1', content)
-        content = re.sub(r'\\\(([^)]+)\\\)', r'\1', content)
-        
-        # 移除常见的LaTeX命令
-        content = re.sub(r'\\[a-zA-Z]+\{[^}]*\}', '', content)
-        content = re.sub(r'\\[a-zA-Z]+', '', content)
-        
-        # 处理列表
+        # 处理enumerate环境
         content = re.sub(r'\\begin\{enumerate\}', '', content)
         content = re.sub(r'\\end\{enumerate\}', '', content)
-        content = re.sub(r'\\begin\{itemize\}', '', content)
-        content = re.sub(r'\\end\{itemize\}', '', content)
         content = re.sub(r'\\item\s*', '• ', content)
         
+        # 处理itemize环境
+        content = re.sub(r'\\begin\{itemize\}', '', content)
+        content = re.sub(r'\\end\{itemize\}', '', content)
+        
+        # 处理其他常见的LaTeX命令（但不处理数学公式）
+        # 移除文本格式命令，保留公式
+        content = re.sub(r'\\(?:textbf|textit|text|emph)\{([^}]*)\}', r'\1', content)
+        content = re.sub(r'\\(?:textbf|textit|text|emph)\s+([^\s]+)', r'\1', content)
+        
         # 清理多余空白
-        content = re.sub(r'\s+', ' ', content)
-        content = re.sub(r'\n\s*\n', '\n\n', content)
+        content = re.sub(r'[ \t]+', ' ', content)
+        content = re.sub(r'\n\s*\n\s*\n', '\n\n', content)
         
         return content.strip()
 
@@ -611,6 +939,105 @@ class ExportRenderer:
             return candidate
         return None
 
+    def _append_latex_content(self, container, latex_content: str, bullet_style: str = 'List Bullet') -> None:
+        """
+        向 docx 容器追加包含LaTeX公式的内容
+        
+        参数:
+            container: docx 段落或单元格对象。
+            latex_content: 包含LaTeX公式的内容字符串。
+            bullet_style: 项目符号样式名称。
+            
+        返回:
+            None。
+        """
+        if not latex_content:
+            return
+        
+        # 解析LaTeX内容，分割为文本和公式片段
+        parts = self._parse_latex_content(latex_content)
+        
+        if not parts:
+            return
+        
+        # 按行处理（处理换行）
+        lines = []
+        current_line_parts = []
+        
+        for part in parts:
+            if part['type'] == 'text':
+                # 检查文本中是否包含换行
+                text_lines = part['content'].split('\n')
+                if len(text_lines) > 1:
+                    # 如果有换行，先保存当前行的内容
+                    if current_line_parts:
+                        lines.append(current_line_parts)
+                        current_line_parts = []
+                    # 处理多行文本
+                    for i, text_line in enumerate(text_lines):
+                        if i > 0:
+                            # 新行
+                            if current_line_parts:
+                                lines.append(current_line_parts)
+                                current_line_parts = []
+                        if text_line.strip():
+                            current_line_parts.append({'type': 'text', 'content': text_line})
+                else:
+                    # 单行文本
+                    if text_lines[0].strip():
+                        current_line_parts.append(part)
+            else:
+                # 公式片段
+                current_line_parts.append(part)
+        
+        # 添加最后一行
+        if current_line_parts:
+            lines.append(current_line_parts)
+        
+        # 如果没有行，添加一个空行
+        if not lines:
+            lines = [[]]
+        
+        # 写入段落
+        is_table_cell = hasattr(container, '_tc')
+        existing_paragraphs = list(getattr(container, 'paragraphs', [])) if is_table_cell else []
+        first_paragraph = existing_paragraphs[0] if existing_paragraphs else None
+        
+        for idx, line_parts in enumerate(lines):
+            if idx == 0 and first_paragraph is not None:
+                paragraph = first_paragraph
+                paragraph.text = ''
+            else:
+                paragraph = container.add_paragraph()
+            
+            # 检查是否是列表项
+            is_bullet = False
+            if line_parts and line_parts[0]['type'] == 'text':
+                text = line_parts[0]['content']
+                if text.startswith('•'):
+                    is_bullet = True
+                    line_parts[0]['content'] = text[1:].strip()
+                    if bullet_style:
+                        paragraph.style = bullet_style
+            
+            # 添加内容片段
+            for part in line_parts:
+                if part['type'] == 'text':
+                    text = part['content'].strip()
+                    if text:
+                        run = paragraph.add_run(text)
+                elif part['type'] == 'formula':
+                    # 内联公式
+                    run = paragraph.add_run()
+                    self._add_latex_formula_to_run(run, part['content'], is_display=False)
+                elif part['type'] == 'display_formula':
+                    # 块级公式（居中显示）
+                    run = paragraph.add_run()
+                    self._add_latex_formula_to_run(run, part['content'], is_display=True)
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+            paragraph.paragraph_format.space_after = Pt(6)
+    
     def _append_text_lines(self, container, lines: List[str], bullet_style: str = 'List Bullet') -> None:
         """向 docx 容器追加文本行并处理项目符号。
 
@@ -725,9 +1152,9 @@ class ExportRenderer:
             # 转换LaTeX为MathML
             mathml = latex_to_mathml(latex_math)
             
-            # 创建MathML元素
-            math_element = OxmlElement('m:oMath')
-            math_element.set(qn('xmlns:m'), 'http://schemas.openxmlformats.org/officeDocument/2006/math')
+            # 创建MathML元素，使用parse_xml创建包含命名空间的元素
+            math_element_xml = '<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"></m:oMath>'
+            math_element = parse_xml(math_element_xml)
             
             # 解析MathML并添加到元素中
             mathml_xml = parse_xml(f'<math xmlns="http://www.w3.org/1998/Math/MathML">{mathml}</math>')
