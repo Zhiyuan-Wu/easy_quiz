@@ -1090,14 +1090,17 @@ class ExportRenderer:
         existing_paragraphs = list(getattr(container, 'paragraphs', [])) if is_table_cell else []
         first_paragraph = existing_paragraphs[0] if existing_paragraphs else None
         paragraph_idx = 0
-        in_enumerate = False
+        current_paragraph = None  # 当前段落引用，用于累积文本和行内公式
+        last_was_display = False  # 上一个part是否是行间公式
         
         for part in parts:
             if part['type'] == 'enumerate_start':
-                in_enumerate = True
+                current_paragraph = None  # 重置当前段落
+                last_was_display = False
                 continue
             elif part['type'] == 'enumerate_end':
-                in_enumerate = False
+                current_paragraph = None  # 重置当前段落
+                last_was_display = False
                 continue
             elif part['type'] == 'enumerate_item':
                 # 创建新的段落用于列表项
@@ -1107,6 +1110,9 @@ class ExportRenderer:
                     paragraph_idx += 1
                 else:
                     paragraph = container.add_paragraph()
+                
+                current_paragraph = paragraph  # 更新当前段落
+                last_was_display = False
                 
                 # 手动添加序号（A. B. C. D. ...）
                 item_index = part.get('index', 1)
@@ -1130,46 +1136,25 @@ class ExportRenderer:
                     if content_part['type'] == 'text':
                         text = content_part['content'].strip()
                         if text:
-                            run = paragraph.add_run(text)
+                            paragraph.add_run(text)
                     elif content_part['type'] == 'formula':
-                        # 内联公式
+                        # 内联公式：添加到当前段落
                         run = paragraph.add_run()
                         self._add_latex_formula_to_run(run, content_part['content'], is_display=False)
                     elif content_part['type'] == 'display_formula':
-                        # 块级公式（居中显示）
+                        # 块级公式（居中显示）：在enumerate项中，仍然在同一段落但居中
                         run = paragraph.add_run()
                         self._add_latex_formula_to_run(run, content_part['content'], is_display=True)
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        last_was_display = True
                 
                 paragraph.paragraph_format.space_after = Pt(6)
                 paragraph.paragraph_format.left_indent = Inches(0.25)  # 缩进
                 continue
             
             # 处理普通文本和公式（非enumerate环境）
-            # 按行处理（处理换行）
-            if part['type'] == 'text':
-                text_lines = part['content'].split('\n')
-                for line_idx, text_line in enumerate(text_lines):
-                    if not text_line.strip():
-                        continue
-                    
-                    if paragraph_idx == 0 and first_paragraph is not None and line_idx == 0:
-                        paragraph = first_paragraph
-                        paragraph.text = ''
-                        paragraph_idx += 1
-                    else:
-                        paragraph = container.add_paragraph()
-                    
-                    # 检查是否是项目符号（•）
-                    if text_line.startswith('•'):
-                        paragraph.style = bullet_style
-                        text_line = text_line[1:].strip()
-                    
-                    if text_line:
-                        run = paragraph.add_run(text_line)
-                    paragraph.paragraph_format.space_after = Pt(6)
-            else:
-                # 公式片段
+            if part['type'] == 'display_formula':
+                # 行间公式：总是创建新段落并居中
                 if paragraph_idx == 0 and first_paragraph is not None:
                     paragraph = first_paragraph
                     paragraph.text = ''
@@ -1177,17 +1162,71 @@ class ExportRenderer:
                 else:
                     paragraph = container.add_paragraph()
                 
-                if part['type'] == 'formula':
-                    # 内联公式
-                    run = paragraph.add_run()
-                    self._add_latex_formula_to_run(run, part['content'], is_display=False)
-                elif part['type'] == 'display_formula':
-                    # 块级公式（居中显示）
-                    run = paragraph.add_run()
-                    self._add_latex_formula_to_run(run, part['content'], is_display=True)
-                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
+                run = paragraph.add_run()
+                self._add_latex_formula_to_run(run, part['content'], is_display=True)
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 paragraph.paragraph_format.space_after = Pt(6)
+                
+                current_paragraph = None  # 行间公式后，重置当前段落
+                last_was_display = True
+            elif part['type'] == 'formula':
+                # 行内公式：添加到当前段落（如果存在且不是行间公式后的段落），否则创建新段落
+                if current_paragraph is None or last_was_display:
+                    # 需要创建新段落
+                    if paragraph_idx == 0 and first_paragraph is not None:
+                        paragraph = first_paragraph
+                        paragraph.text = ''
+                        paragraph_idx += 1
+                    else:
+                        paragraph = container.add_paragraph()
+                    current_paragraph = paragraph
+                else:
+                    paragraph = current_paragraph
+                
+                run = paragraph.add_run()
+                self._add_latex_formula_to_run(run, part['content'], is_display=False)
+                paragraph.paragraph_format.space_after = Pt(6)
+                last_was_display = False
+            elif part['type'] == 'text':
+                # 文本：按行处理，处理换行
+                text_lines = part['content'].split('\n')
+                for line_idx, text_line in enumerate(text_lines):
+                    if not text_line.strip():
+                        # 空行：创建新段落
+                        if paragraph_idx == 0 and first_paragraph is not None and line_idx == 0:
+                            paragraph = first_paragraph
+                            paragraph.text = ''
+                            paragraph_idx += 1
+                        else:
+                            paragraph = container.add_paragraph()
+                        paragraph.paragraph_format.space_after = Pt(6)
+                        current_paragraph = None  # 空行后重置
+                        last_was_display = False
+                        continue
+                    
+                    # 非空行：添加到当前段落（如果存在且不是行间公式后且是第一行），否则创建新段落
+                    if current_paragraph is None or last_was_display or (line_idx > 0):
+                        # 需要创建新段落（新段落、行间公式后、或换行后）
+                        if paragraph_idx == 0 and first_paragraph is not None and line_idx == 0:
+                            paragraph = first_paragraph
+                            paragraph.text = ''
+                            paragraph_idx += 1
+                        else:
+                            paragraph = container.add_paragraph()
+                        current_paragraph = paragraph
+                    else:
+                        # 追加到当前段落（第一行且当前段落存在且不是行间公式后）
+                        paragraph = current_paragraph
+                    
+                    # 检查是否是项目符号（•）
+                    if text_line.startswith('•'):
+                        paragraph.style = bullet_style
+                        text_line = text_line[1:].strip()
+                    
+                    if text_line:
+                        paragraph.add_run(text_line)
+                    paragraph.paragraph_format.space_after = Pt(6)
+                    last_was_display = False
     
     def _append_text_lines(self, container, lines: List[str], bullet_style: str = 'List Bullet') -> None:
         """向 docx 容器追加文本行并处理项目符号。
