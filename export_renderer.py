@@ -171,32 +171,51 @@ class ExportRenderer:
             section.left_margin = Inches(0.9)
             section.right_margin = Inches(0.9)
 
-        title_text = title or '数学试卷'
-        title_para = doc.add_heading(title_text, level=0)
-        title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        current_date = datetime.now().strftime("%Y年%m月%d日")
-        date_para = doc.add_paragraph(f"日期：{current_date}")
-        date_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
+        # 添加空行
         doc.add_paragraph()
 
+        # 添加姓名、学号、班级信息（使用制表符分隔，参考模板格式）
         info_para = doc.add_paragraph()
-        info_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        info_para.style = 'Body Text'
         info_run = info_para.add_run("姓名：__________    学号：__________    班级：__________")
         info_run.font.size = Pt(11)
-        info_para.paragraph_format.space_after = Pt(12)
+        info_para.paragraph_format.space_after = Pt(6)
+        info_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        notice_heading = doc.add_paragraph("注意事项")
-        notice_heading.style = 'Heading 2'
+        # 添加空行
+        doc.add_paragraph()
+
+        # 添加标题
+        title_text = title or '数学试卷'
+        title_para = doc.add_paragraph(title_text)
+        title_para.style = 'Normal'
+        title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_para.paragraph_format.space_after = Pt(6)
+        
+        # 添加标题（使用Title样式）
+        title_para2 = doc.add_paragraph(title_text)
+        title_para2.style = 'Title'
+        title_para2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_para2.paragraph_format.space_after = Pt(12)
+
+        # 添加空行
+        doc.add_paragraph()
+
+        # 添加注意事项
+        notice_heading = doc.add_paragraph("注意事项：")
+        notice_heading.style = 'Body Text'
+        notice_heading.paragraph_format.space_after = Pt(6)
+
         notice_items = [
-            "答卷前，考生务必将自己的姓名、考生号、考场号和座位号填写答题卡上，用2B铅笔将试卷类型（B）填涂在答题卡相应位置上，将条形码横贴在答题卡右上角“条形码粘贴处”。",
-            "作答选择题时，选出每小题答案后，用2B铅笔在答题卡上对应题目选项的答案信息点涂黑；如需改动，用橡皮擦干净后，再选涂其他答案。答案不能答在试卷上。写在试卷、草稿纸和答题卡上的非答题区域均无效。",
-            "非选择题必须用黑色字迹的钢笔或签字笔作答，答案必须写在答题卡各题目指定区域内相应位置上；如需改动，先划掉原来的答案，然后再写上新答案；不准使用铅笔和涂改液。不按以上要求作答无效。",
-            "考生必须保持答题卡的整洁。考试结束后，将试卷和答题卡一并交回。"
+            "1.答卷前，考生务必将自己的姓名、考生号、考场号和座位号填写答题卡上，用2B铅笔将试卷类型（B）填涂在答题卡相应位置上，将条形码横贴在答题卡右上角\"条形码粘贴处\"。",
+            "2.作答选择题时，选出每小题答案后，用2B铅笔在答题卡上对应题目选项的答案信息点涂黑；如需改动，用橡皮擦干净后，再选涂其他答案。答案不能答在试卷上。写在试卷、草稿纸和答题卡上的非答题区域均无效。",
+            "3.非选择题必须用黑色字迹的钢笔或签字笔作答，答案必须写在答题卡各题目指定区域内相应位置上；如需改动，先划掉原来的答案，然后再写上新答案；不准使用铅笔和涂改液。不按以上要求作答无效。",
+            "4.考生必须保持答题卡的整洁。考试结束后，将试卷和答题卡一并交回。"
         ]
         for item in notice_items:
-            notice_para = doc.add_paragraph(item, style='List Number')
+            notice_para = doc.add_paragraph()
+            notice_para.style = 'List Paragraph'
+            notice_run = notice_para.add_run(item)
             notice_para.paragraph_format.space_after = Pt(4)
 
         doc.add_paragraph()
@@ -939,6 +958,91 @@ class ExportRenderer:
             return candidate
         return None
 
+    def _parse_enumerate_environment(self, latex_content: str) -> List[Dict]:
+        """
+        解析LaTeX中的enumerate环境，将其转换为列表项
+        
+        参数:
+            latex_content: LaTeX 内容字符串。
+            
+        返回:
+            包含 {'type': 'text'/'formula'/'display_formula'/'enumerate_start'/'enumerate_item'/'enumerate_end', 'content': ...} 的列表。
+        """
+        if not latex_content:
+            return []
+        
+        parts = []
+        content_len = len(latex_content)
+        i = 0
+        last_pos = 0
+        
+        while i < content_len:
+            # 匹配 \begin{enumerate}
+            if latex_content[i:].startswith('\\begin{enumerate}'):
+                # 找到对应的 \end{enumerate}
+                begin_pos = i
+                begin_end = latex_content.find('}', begin_pos)
+                if begin_end == -1:
+                    i += 1
+                    continue
+                
+                # 查找 \end{enumerate}
+                end_pos = latex_content.find('\\end{enumerate}', begin_end)
+                if end_pos == -1:
+                    # 没有找到结束标记，跳过
+                    i += 1
+                    continue
+                
+                # 添加前面的文本
+                before = latex_content[last_pos:begin_pos].strip()
+                if before:
+                    parts.append({'type': 'text', 'content': before})
+                
+                # 提取enumerate环境的内容
+                env_start = begin_end + 1
+                env_content = latex_content[env_start:end_pos].strip()
+                
+                # 添加enumerate开始标记
+                parts.append({'type': 'enumerate_start', 'content': ''})
+                
+                # 解析enumerate环境内的\item
+                item_pattern = r'\\item\s*'
+                item_matches = list(re.finditer(item_pattern, env_content))
+                
+                if item_matches:
+                    for idx, match in enumerate(item_matches):
+                        item_start = match.end()
+                        # 找到下一个\item或结束位置
+                        if idx + 1 < len(item_matches):
+                            item_end = item_matches[idx + 1].start()
+                        else:
+                            item_end = len(env_content)
+                        
+                        item_content = env_content[item_start:item_end].strip()
+                        if item_content:
+                            parts.append({'type': 'enumerate_item', 'content': item_content, 'index': idx + 1})
+                else:
+                    # 如果没有\item，将整个内容作为一个项
+                    if env_content.strip():
+                        parts.append({'type': 'enumerate_item', 'content': env_content.strip(), 'index': 1})
+                
+                # 添加enumerate结束标记
+                parts.append({'type': 'enumerate_end', 'content': ''})
+                
+                last_pos = end_pos + len('\\end{enumerate}')
+                i = last_pos
+                continue
+            
+            i += 1
+        
+        # 添加剩余的文本
+        if last_pos < content_len:
+            remaining = latex_content[last_pos:].strip()
+            if remaining:
+                parts.append({'type': 'text', 'content': remaining})
+        
+        return parts if parts else [{'type': 'text', 'content': latex_content}]
+    
     def _append_latex_content(self, container, latex_content: str, bullet_style: str = 'List Bullet') -> None:
         """
         向 docx 容器追加包含LaTeX公式的内容
@@ -954,79 +1058,126 @@ class ExportRenderer:
         if not latex_content:
             return
         
-        # 解析LaTeX内容，分割为文本和公式片段
-        parts = self._parse_latex_content(latex_content)
+        # 首先处理enumerate环境
+        enumerate_parts = self._parse_enumerate_environment(latex_content)
+        
+        # 将处理后的内容重新组合，然后解析公式
+        processed_parts = []
+        for part in enumerate_parts:
+            if part['type'] in ('enumerate_start', 'enumerate_end'):
+                processed_parts.append(part)
+            elif part['type'] == 'enumerate_item':
+                # 对enumerate项的内容进行公式解析
+                item_parts = self._parse_latex_content(part['content'])
+                processed_parts.append({
+                    'type': 'enumerate_item',
+                    'content_parts': item_parts,
+                    'index': part.get('index', 1)
+                })
+            else:
+                # 普通文本内容，解析公式
+                text_parts = self._parse_latex_content(part['content'])
+                processed_parts.extend(text_parts)
+        
+        # 现在处理组合后的parts
+        parts = processed_parts
         
         if not parts:
             return
-        
-        # 按行处理（处理换行）
-        lines = []
-        current_line_parts = []
-        
-        for part in parts:
-            if part['type'] == 'text':
-                # 检查文本中是否包含换行
-                text_lines = part['content'].split('\n')
-                if len(text_lines) > 1:
-                    # 如果有换行，先保存当前行的内容
-                    if current_line_parts:
-                        lines.append(current_line_parts)
-                        current_line_parts = []
-                    # 处理多行文本
-                    for i, text_line in enumerate(text_lines):
-                        if i > 0:
-                            # 新行
-                            if current_line_parts:
-                                lines.append(current_line_parts)
-                                current_line_parts = []
-                        if text_line.strip():
-                            current_line_parts.append({'type': 'text', 'content': text_line})
-                else:
-                    # 单行文本
-                    if text_lines[0].strip():
-                        current_line_parts.append(part)
-            else:
-                # 公式片段
-                current_line_parts.append(part)
-        
-        # 添加最后一行
-        if current_line_parts:
-            lines.append(current_line_parts)
-        
-        # 如果没有行，添加一个空行
-        if not lines:
-            lines = [[]]
         
         # 写入段落
         is_table_cell = hasattr(container, '_tc')
         existing_paragraphs = list(getattr(container, 'paragraphs', [])) if is_table_cell else []
         first_paragraph = existing_paragraphs[0] if existing_paragraphs else None
+        paragraph_idx = 0
+        in_enumerate = False
         
-        for idx, line_parts in enumerate(lines):
-            if idx == 0 and first_paragraph is not None:
-                paragraph = first_paragraph
-                paragraph.text = ''
-            else:
-                paragraph = container.add_paragraph()
+        for part in parts:
+            if part['type'] == 'enumerate_start':
+                in_enumerate = True
+                continue
+            elif part['type'] == 'enumerate_end':
+                in_enumerate = False
+                continue
+            elif part['type'] == 'enumerate_item':
+                # 创建新的段落用于列表项
+                if paragraph_idx == 0 and first_paragraph is not None:
+                    paragraph = first_paragraph
+                    paragraph.text = ''
+                    paragraph_idx += 1
+                else:
+                    paragraph = container.add_paragraph()
+                
+                # 手动添加序号（A. B. C. D. ...）
+                item_index = part.get('index', 1)
+                letter = chr(ord('A') + item_index - 1)  # A, B, C, D, ...
+                if item_index > 26:
+                    # 如果超过26个，使用AA, AB, AC...
+                    letter = chr(ord('A') + (item_index - 1) // 26 - 1) + chr(ord('A') + (item_index - 1) % 26)
+                
+                # 添加序号（加粗）
+                index_run = paragraph.add_run(f"{letter}. ")
+                index_run.bold = True
+                
+                # 处理列表项的内容（可能包含公式）
+                content_parts = part.get('content_parts', [])
+                if not content_parts:
+                    # 如果没有解析过，使用原始内容
+                    content_parts = self._parse_latex_content(part.get('content', ''))
+                
+                # 添加内容片段
+                for content_part in content_parts:
+                    if content_part['type'] == 'text':
+                        text = content_part['content'].strip()
+                        if text:
+                            run = paragraph.add_run(text)
+                    elif content_part['type'] == 'formula':
+                        # 内联公式
+                        run = paragraph.add_run()
+                        self._add_latex_formula_to_run(run, content_part['content'], is_display=False)
+                    elif content_part['type'] == 'display_formula':
+                        # 块级公式（居中显示）
+                        run = paragraph.add_run()
+                        self._add_latex_formula_to_run(run, content_part['content'], is_display=True)
+                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                
+                paragraph.paragraph_format.space_after = Pt(6)
+                paragraph.paragraph_format.left_indent = Inches(0.25)  # 缩进
+                continue
             
-            # 检查是否是列表项
-            is_bullet = False
-            if line_parts and line_parts[0]['type'] == 'text':
-                text = line_parts[0]['content']
-                if text.startswith('•'):
-                    is_bullet = True
-                    line_parts[0]['content'] = text[1:].strip()
-                    if bullet_style:
+            # 处理普通文本和公式（非enumerate环境）
+            # 按行处理（处理换行）
+            if part['type'] == 'text':
+                text_lines = part['content'].split('\n')
+                for line_idx, text_line in enumerate(text_lines):
+                    if not text_line.strip():
+                        continue
+                    
+                    if paragraph_idx == 0 and first_paragraph is not None and line_idx == 0:
+                        paragraph = first_paragraph
+                        paragraph.text = ''
+                        paragraph_idx += 1
+                    else:
+                        paragraph = container.add_paragraph()
+                    
+                    # 检查是否是项目符号（•）
+                    if text_line.startswith('•'):
                         paragraph.style = bullet_style
-            
-            # 添加内容片段
-            for part in line_parts:
-                if part['type'] == 'text':
-                    text = part['content'].strip()
-                    if text:
-                        run = paragraph.add_run(text)
-                elif part['type'] == 'formula':
+                        text_line = text_line[1:].strip()
+                    
+                    if text_line:
+                        run = paragraph.add_run(text_line)
+                    paragraph.paragraph_format.space_after = Pt(6)
+            else:
+                # 公式片段
+                if paragraph_idx == 0 and first_paragraph is not None:
+                    paragraph = first_paragraph
+                    paragraph.text = ''
+                    paragraph_idx += 1
+                else:
+                    paragraph = container.add_paragraph()
+                
+                if part['type'] == 'formula':
                     # 内联公式
                     run = paragraph.add_run()
                     self._add_latex_formula_to_run(run, part['content'], is_display=False)
@@ -1035,8 +1186,8 @@ class ExportRenderer:
                     run = paragraph.add_run()
                     self._add_latex_formula_to_run(run, part['content'], is_display=True)
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            
-            paragraph.paragraph_format.space_after = Pt(6)
+                
+                paragraph.paragraph_format.space_after = Pt(6)
     
     def _append_text_lines(self, container, lines: List[str], bullet_style: str = 'List Bullet') -> None:
         """向 docx 容器追加文本行并处理项目符号。
