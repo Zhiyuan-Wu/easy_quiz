@@ -57,25 +57,93 @@ function removeImage(url) {
     });
 }
 
-function handleExamUpload(e) {
+async function handleExamUpload(e) {
     const file = e.target.files?.[0];
     if (!file || !examPreview) {
         return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-        const uploadZone = document.getElementById('upload-zone');
-        if (uploadZone) {
-            uploadZone.style.display = 'none';
+    const uploadZone = document.getElementById('upload-zone');
+    if (uploadZone) {
+        uploadZone.style.display = 'none';
+    }
+
+    examPreview.style.display = 'block';
+
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+
+    const previewContainer = examPreview.querySelector('.preview-image');
+    const previewFilename = examPreview.querySelector('.preview-filename');
+    const previewMetaType = examPreview.querySelector('.preview-filetype');
+
+    if (previewFilename) {
+        previewFilename.textContent = file.name;
+    }
+    if (previewMetaType) {
+        const ext = (file.name.split('.').pop() || '').toUpperCase();
+        previewMetaType.textContent = isPdf
+            ? 'PDF 文档'
+            : file.type
+                ? file.type
+                : ext
+                    ? `.${ext}`
+                    : '未知类型';
+    }
+
+    if (!previewContainer) {
+        return;
+    }
+    previewContainer.innerHTML = '';
+
+    if (isPdf) {
+        previewContainer.innerHTML = `
+            <div class="preview-loading">
+                <i class="fas fa-spinner fa-spin"></i>
+                <span>正在生成 PDF 预览...</span>
+            </div>
+        `;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch('/api/pdf-preview', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await response.json();
+
+            if (result.success && result.preview) {
+                const previewSrc = result.preview.startsWith('data:')
+                    ? result.preview
+                    : `data:image/png;base64,${result.preview}`;
+                previewContainer.innerHTML = `<img src="${previewSrc}" alt="PDF预览第一页">`;
+            } else {
+                const message = result.message || '无法生成PDF预览';
+                previewContainer.innerHTML = `
+                    <div class="preview-error">
+                        <i class="fas fa-triangle-exclamation"></i>
+                        <span>${message}</span>
+                    </div>
+                `;
+                showMessage(`PDF预览失败: ${message}`, 'error');
+            }
+        } catch (error) {
+            previewContainer.innerHTML = `
+                <div class="preview-error">
+                    <i class="fas fa-triangle-exclamation"></i>
+                    <span>PDF预览失败: ${error.message}</span>
+                </div>
+            `;
+            showMessage('PDF预览失败: ' + error.message, 'error');
         }
-        examPreview.style.display = 'block';
-        const previewContainer = examPreview.querySelector('.preview-image');
-        if (previewContainer) {
+    } else {
+        const reader = new FileReader();
+        reader.onload = (event) => {
             previewContainer.innerHTML = `<img src="${event.target.result}" alt="试卷预览">`;
-        }
-    };
-    reader.readAsDataURL(file);
+        };
+        reader.readAsDataURL(file);
+    }
 }
 
 function removeExam() {
@@ -88,6 +156,14 @@ function removeExam() {
         const previewContainer = examPreview.querySelector('.preview-image');
         if (previewContainer) {
             previewContainer.innerHTML = '';
+        }
+        const previewFilename = examPreview.querySelector('.preview-filename');
+        if (previewFilename) {
+            previewFilename.textContent = '';
+        }
+        const previewMetaType = examPreview.querySelector('.preview-filetype');
+        if (previewMetaType) {
+            previewMetaType.textContent = '';
         }
     }
     if (examUpload) {
@@ -106,7 +182,7 @@ async function handleParseExam() {
 
     const file = examUpload.files?.[0];
     if (!file) {
-        showMessage('请先选择试卷图片', 'error');
+        showMessage('请先选择试卷文件', 'error');
         return;
     }
 

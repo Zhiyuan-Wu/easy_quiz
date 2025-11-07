@@ -26,7 +26,12 @@
         <!-- 用户中心内容 -->
         <div class="profile-container">
             <div class="card">
-                <h2><i class="fas fa-user-circle"></i> 用户中心</h2>
+                <h2 class="heading-with-help">
+                    <span><i class="fas fa-user-circle"></i> 用户中心</span>
+                    <button type="button" class="help-trigger" data-help-key="profilePage" aria-label="用户中心帮助">
+                        <i class="fas fa-circle-question"></i>
+                    </button>
+                </h2>
                 
                 <!-- 标签页导航 -->
                 <nav class="profile-tabs">
@@ -41,7 +46,12 @@
                 <!-- 基本信息标签页 -->
                 <div id="info-tab" class="profile-tab-content active">
                     <div class="profile-info">
-                        <h3><i class="fas fa-user"></i> 个人信息</h3>
+                        <h3 class="heading-with-help">
+                            <span><i class="fas fa-user"></i> 个人信息</span>
+                            <button type="button" class="help-trigger" data-help-key="profileInfoSection" aria-label="个人信息帮助">
+                                <i class="fas fa-circle-question"></i>
+                            </button>
+                        </h3>
                         <div class="info-grid">
                             <div class="info-item">
                                 <label>用户名</label>
@@ -59,7 +69,12 @@
                     </div>
 
                     <div class="password-reset">
-                        <h3><i class="fas fa-key"></i> 修改密码</h3>
+                        <h3 class="heading-with-help">
+                            <span><i class="fas fa-key"></i> 修改密码</span>
+                            <button type="button" class="help-trigger" data-help-key="passwordSection" aria-label="修改密码帮助">
+                                <i class="fas fa-circle-question"></i>
+                            </button>
+                        </h3>
                         <form id="password-form">
                             <div class="form-group">
                                 <label for="old-password">当前密码</label>
@@ -85,7 +100,12 @@
                 <!-- 导出记录标签页 -->
                 <div id="exports-tab" class="profile-tab-content">
                     <div class="exports-header">
-                        <h3><i class="fas fa-download"></i> 导出记录</h3>
+                        <h3 class="heading-with-help">
+                            <span><i class="fas fa-download"></i> 导出记录</span>
+                            <button type="button" class="help-trigger" data-help-key="exportHistorySection" aria-label="导出记录帮助">
+                                <i class="fas fa-circle-question"></i>
+                            </button>
+                        </h3>
                         <button id="refresh-exports" class="btn btn-secondary">
                             <i class="fas fa-refresh"></i> 刷新
                         </button>
@@ -102,7 +122,12 @@
     <div id="re-export-modal" class="modal">
         <div class="modal-content cart-modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-redo"></i> 重新导出</h3>
+                <h3 class="heading-with-help">
+                    <span><i class="fas fa-redo"></i> 重新导出</span>
+                    <button type="button" class="help-trigger" data-help-key="reExportModal" aria-label="重新导出帮助">
+                        <i class="fas fa-circle-question"></i>
+                    </button>
+                </h3>
                 <button class="modal-close" id="re-export-modal-close">&times;</button>
             </div>
             <div class="modal-body">
@@ -157,6 +182,19 @@
         </div>
     </div>
 
+    <!-- 帮助模态框 -->
+    <div id="help-modal" class="modal">
+        <div class="modal-content small-modal help-modal-content">
+            <div class="modal-header">
+                <h3 id="help-modal-title">使用帮助</h3>
+                <button class="modal-close" data-close="help-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="help-modal-body" class="help-modal-body"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- 加载提示 -->
     <div id="loading" class="loading hidden">
         <div class="loading-spinner"></div>
@@ -169,6 +207,8 @@
         <button id="message-close">&times;</button>
     </div>
 
+    <script src="/static/help-content.js"></script>
     <script src="/static/profile.js"></script>
+    <script src="/static/help.js"></script>
 </body>
 </html>

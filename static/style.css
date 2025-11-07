@@ -38,6 +38,115 @@ body {
     padding: 20px;
 }
 
+.heading-with-help {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.heading-with-help > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.help-trigger {
+    border: none;
+    background: transparent;
+    color: var(--color-primary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    font-size: 0.95rem;
+    transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.help-trigger:hover,
+.help-trigger:focus {
+    color: var(--color-primary-dark);
+    outline: none;
+    transform: translateY(-1px);
+}
+
+.help-trigger i {
+    pointer-events: none;
+    font-size: 1.05rem;
+}
+
+.preview-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+    color: var(--color-muted);
+    font-size: 0.9rem;
+}
+
+.preview-filename {
+    font-weight: 600;
+    color: var(--color-text);
+    word-break: break-all;
+}
+
+.preview-filetype {
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(20, 118, 255, 0.12);
+    color: var(--color-primary);
+    font-size: 0.8rem;
+}
+
+.preview-loading,
+.preview-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 220px;
+    color: var(--color-muted);
+    font-size: 0.95rem;
+}
+
+.preview-loading i,
+.preview-error i {
+    font-size: 1.4rem;
+}
+
+.preview-error {
+    color: var(--color-error);
+}
+
+.modal-content.small-modal {
+    max-width: 540px;
+}
+
+.help-modal-body p {
+    margin-bottom: 12px;
+}
+
+.help-modal-body ul {
+    margin: 0 0 12px 1.2em;
+    padding-left: 0.6em;
+    list-style: disc;
+}
+
+.help-modal-body li {
+    margin-bottom: 6px;
+    line-height: 1.6;
+}
+
+.help-modal-body strong {
+    color: var(--color-text);
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
 /* 状态栏样式 */
 
 .status-bar {

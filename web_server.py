@@ -5,11 +5,13 @@
 
 from flask import Flask, render_template, request, jsonify, send_from_directory, session, redirect, url_for
 from functools import wraps
+import base64
 import json
 import os
 import uuid
 import time
 from datetime import datetime
+from io import BytesIO
 from werkzeug.utils import secure_filename
 from question_manager import QuestionManager
 from ocr_client import DeepSeekOCRClient
@@ -28,6 +30,7 @@ from config import (
     EXAM_PARSE_ANSWER_BATCH_SIZE,
 )
 from logger import get_logger
+from pdf2image import convert_from_bytes
 from utils import (
     apply_filename_replacements,
     convert_pdf_to_images,
@@ -1018,7 +1021,7 @@ def delete_question(question_id):
     try:
         current_user_id = session['user_id']
         success = question_manager.delete_question(question_id, current_user_id)
-        
+
         if success:
             return jsonify({
                 'success': True,
@@ -1029,9 +1032,47 @@ def delete_question(question_id):
                 'success': False,
                 'message': '题目不存在或无权删除'
             }), 404
-            
+
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/pdf-preview', methods=['POST'])
+@login_required
+def pdf_preview():
+    """生成PDF文件第一页的预览图"""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'message': '没有选择文件'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'message': '没有选择文件'}), 400
+
+    if not file.filename.lower().endswith('.pdf'):
+        return jsonify({'success': False, 'message': '仅支持PDF文件预览'}), 400
+
+    try:
+        pdf_content = file.read()
+        if not pdf_content:
+            return jsonify({'success': False, 'message': '文件内容为空'}), 400
+
+        images = convert_from_bytes(pdf_content, first_page=1, last_page=1)
+        if not images:
+            return jsonify({'success': False, 'message': '无法生成PDF预览'}), 500
+
+        preview_image = images[0]
+        buffer = BytesIO()
+        preview_image.save(buffer, format='PNG')
+        preview_data = base64.b64encode(buffer.getvalue()).decode('ascii')
+
+        return jsonify({
+            'success': True,
+            'preview': f'data:image/png;base64,{preview_data}'
+        })
+    except Exception as e:
+        logger.log_error(e, f"生成PDF预览失败 - 文件名: {file.filename}")
+        return jsonify({'success': False, 'message': f'无法生成PDF预览: {str(e)}'}), 500
+
 
 @app.route('/api/ocr-parse', methods=['POST'])
 @login_required
