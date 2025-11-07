@@ -744,7 +744,7 @@ class QuestionManager:
             instruction_items.append(
                 '判断每道题目的类型并返回 question_type 字段，可选值仅限 "选择题"、"填空题"、"解答题"，若无法确定请返回 "解答题"'
             )
-            if get_answer_batch_size is not None:
+            if get_answer_batch_size is None:
                 instruction_items.append("给每道题目生成详细的参考解答，包括解题步骤和最终答案")
             instruction_items.append("返回JSON格式，包含题目列表")
 
@@ -807,6 +807,8 @@ class QuestionManager:
                 if not questions:
                     self.logger.log_warning("大模型没有解析出任何题目", "试卷解析")
                     return []
+
+                self.logger.log_question_parsing(len(questions), "试卷解析（原始大模型返回）")
                 
                 # 确保每个题目都有必要的字段
                 validated_questions = []
@@ -951,7 +953,7 @@ LaTeX题面:
 
                 duration = time.time() - start_time
                 self.logger.log_performance("试卷解析", duration, f"解析出 {len(validated_questions)} 道题目")
-                self.logger.log_question_parsing(len(validated_questions), "试卷解析")
+                self.logger.log_question_parsing(len(validated_questions), "试卷解析（解析后）")
                 
                 return validated_questions
                 
