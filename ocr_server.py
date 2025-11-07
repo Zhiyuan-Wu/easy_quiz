@@ -154,13 +154,13 @@ def ocr_endpoint():
             for img_file in sorted(images_dir.glob("*.jpg")):
                 with open(img_file, 'rb') as f:
                     image_data.append({
-                        "filename": "images/" + img_file.name,
+                        "filename": img_file.name,
                         "data": base64.b64encode(f.read()).decode('utf-8')
                     })
             for img_file in sorted(images_dir.glob("*.png")):
                 with open(img_file, 'rb') as f:
                     image_data.append({
-                        "filename": "images/" + img_file.name,
+                        "filename": img_file.name,
                         "data": base64.b64encode(f.read()).decode('utf-8')
                     })
 
