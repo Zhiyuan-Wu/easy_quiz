@@ -729,11 +729,11 @@ class QuestionManager:
                 available_tags = [tag['name'] for tag in tags]
             
             instruction_items = [
-                "去除OCR识别中的明显噪声和不合理内容",
+                "去除OCR识别中的明显噪声和不合理内容，去除与题目内容无关的内容。",
                 "识别并分离每道题目。移除原有题目编号，分值信息。",
                 "将题目内容转换为LaTeX格式，选择题选项优先使用enumerate环境。",
                 "识别题目中引用的图片（如果有），从可用图片列表中选择合适的图片，严格返回可用的图片文件列表中的文件名，不要新增前缀或移除后缀。",
-                "识别OCR文本中的表格结构（使用<table>、<tr>、<td>、<br>标签），移除这些标签并转换为标准的LaTeX table/tabular 环境，保持单元格内容与换行。",
+                "识别OCR文本中的表格结构（使用<table>、<tr>、<td>、<br>标签），移除这些标签并转换为标准的LaTeX table/tabular 环境，保持单元格内容。",
             ]
 
             tag_instruction_prefix = (
