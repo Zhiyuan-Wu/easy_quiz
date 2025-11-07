@@ -283,6 +283,17 @@ async function handleSearch() {
     }
 }
 
+function formatSource(source) {
+    if (!source) {
+        return '未知';
+    }
+    const maxLength = APP_CONFIG.content?.sourceMaxLength || 30;
+    if (source.length <= maxLength) {
+        return source;
+    }
+    return '...' + source.slice(-maxLength);
+}
+
 function renderSearchResults() {
     if (!searchResults) {
         return;
@@ -311,7 +322,7 @@ function renderSearchResults() {
                             </div>
                         </div>
                         <div class="question-right">
-                            <small>${question.source || '未知'} | ${formatDate(question.created_at)}</small>
+                            <small>${formatSource(question.source)} | ${formatDate(question.created_at)}</small>
                         </div>
                     </div>
                 </div>
@@ -337,15 +348,34 @@ async function loadQuestions() {
     try {
         showLoading(true);
 
+        // 先获取题目总数
+        const statsResponse = await fetch('/api/questions/stats');
+        const statsResult = await statsResponse.json();
+
+        if (!statsResult.success) {
+            showMessage('获取题目统计失败: ' + statsResult.message, 'error');
+            return;
+        }
+
+        questionsTotal = statsResult.stats?.total || 0;
+        totalPages = Math.ceil(questionsTotal / QUESTION_PAGE_LIMIT) || 1;
+
+        // 确保当前页码在有效范围内
+        if (currentPage > totalPages && totalPages > 0) {
+            currentPage = totalPages;
+        }
+        if (currentPage < 1) {
+            currentPage = 1;
+        }
+
+        // 根据当前页码获取题目数据
         const response = await fetch(`/api/questions/search?page=${currentPage}&limit=${QUESTION_PAGE_LIMIT}`);
         const result = await response.json();
 
         if (result.success) {
             currentQuestions = result.questions;
-            questionsTotal = result.total || 0;
-            totalPages = Math.ceil(result.total / QUESTION_PAGE_LIMIT) || 1;
-            renderQuestionList(result.total);
-            updatePagination(result.total);
+            renderQuestionList(questionsTotal);
+            updatePagination(questionsTotal);
         } else {
             showMessage('加载题目失败: ' + result.message, 'error');
         }
@@ -388,7 +418,7 @@ function renderQuestionList(totalRecords = questionsTotal) {
                             </div>
                         </div>
                         <div class="question-right">
-                            <small>${question.source || '未知'} | ${formatDate(question.created_at)}</small>
+                            <small>${formatSource(question.source)} | ${formatDate(question.created_at)}</small>
                         </div>
                     </div>
                 </div>
@@ -442,6 +472,11 @@ function closeQuestionModal() {
     if (modalState.isEditing && modalState.original) {
         exitEditMode(true);
     }
+    // 重置滚动条位置
+    const modalBody = questionModal.querySelector('.modal-body');
+    if (modalBody) {
+        modalBody.scrollTop = 0;
+    }
     questionModal.style.display = 'none';
     resetModalState();
 }
@@ -459,17 +494,31 @@ function updatePagination(totalRecords = questionsTotal) {
         ? totalRecords
         : questionsTotal;
 
-    if (pageInfo) {
-        pageInfo.textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页`;
+    // 获取分页按钮元素（从全局作用域或直接获取）
+    const prevBtn = typeof prevPageBtn !== 'undefined' ? prevPageBtn : document.getElementById('prev-page');
+    const nextBtn = typeof nextPageBtn !== 'undefined' ? nextPageBtn : document.getElementById('next-page');
+    const topPrevBtn = typeof topPrevPageBtn !== 'undefined' ? topPrevPageBtn : document.getElementById('top-prev-page');
+    const topNextBtn = typeof topNextPageBtn !== 'undefined' ? topNextPageBtn : document.getElementById('top-next-page');
+    const pageInfoEl = typeof pageInfo !== 'undefined' ? pageInfo : document.getElementById('page-info');
+    const totalCountEl = typeof totalCount !== 'undefined' ? totalCount : document.getElementById('total-count');
+
+    if (pageInfoEl) {
+        pageInfoEl.textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页`;
     }
-    if (prevPageBtn) {
-        prevPageBtn.disabled = currentPage <= 1;
+    if (prevBtn) {
+        prevBtn.disabled = currentPage <= 1;
     }
-    if (nextPageBtn) {
-        nextPageBtn.disabled = currentPage >= totalPages;
+    if (nextBtn) {
+        nextBtn.disabled = currentPage >= totalPages;
     }
-    if (totalCount) {
-        totalCount.textContent = String(totalValue || currentQuestions.length);
+    if (topPrevBtn) {
+        topPrevBtn.disabled = currentPage <= 1;
+    }
+    if (topNextBtn) {
+        topNextBtn.disabled = currentPage >= totalPages;
+    }
+    if (totalCountEl) {
+        totalCountEl.textContent = String(totalValue || currentQuestions.length);
     }
 }
 
@@ -492,6 +541,11 @@ function openQuestionModal(question) {
     updateModalEditingUI();
     if (questionModal) {
         questionModal.style.display = 'block';
+        // 重置滚动条位置到顶部
+        const modalBody = questionModal.querySelector('.modal-body');
+        if (modalBody) {
+            modalBody.scrollTop = 0;
+        }
     }
     renderMath();
 }
