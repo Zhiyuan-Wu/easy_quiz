@@ -523,6 +523,12 @@ function renderMathContent(content) {
 
     let processed = content;
 
+    // 移除 \begin{center}...\end{center} 环境（包括内容）
+    processed = processed.replace(/\\begin\{center\}[\s\S]*?\\end\{center\}/g, '');
+    
+    // 移除 \includegraphics[]{} 命令（支持可选参数）
+    processed = processed.replace(/\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}/g, '');
+
     const placeholders = {
         olStart: '___MATHJAX_OL_START___',
         olEnd: '___MATHJAX_OL_END___',

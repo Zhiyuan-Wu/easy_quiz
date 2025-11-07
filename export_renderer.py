@@ -376,6 +376,8 @@ class ExportRenderer:
             对应题目的 LaTeX 文本。
         """
         latex_body = question.get('latex_content', '') or ''
+        # 移除题目描述中的 \includegraphics[]{} 命令
+        latex_body = re.sub(r'\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}', '', latex_body)
         latex_body = self._convert_enumerate_to_choices(latex_body)
 
         question_body = latex_body.strip()
