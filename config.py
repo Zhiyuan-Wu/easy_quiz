@@ -38,6 +38,10 @@ QUESTION_TAGS = [
 ]
 
 # Web服务器配置
+
+# 试卷解析配置
+EXAM_PARSE_ANSWER_BATCH_SIZE = 6
+
 WEB_CONFIG = {
     "host": "0.0.0.0",
     "port": 5001,

@@ -25,15 +25,21 @@ from config import (
     HOMEWORK_UPLOAD_DIR,
     ANALYTICS_WINDOW_DAYS,
     REPORT_MAX_ITEMS,
+    EXAM_PARSE_ANSWER_BATCH_SIZE,
 )
 from logger import get_logger
+from utils import (
+    apply_filename_replacements,
+    convert_pdf_to_images,
+    save_ocr_images,
+)
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
 # 配置上传文件夹
 UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp'}
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'pdf'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
@@ -416,8 +422,21 @@ def parse_student_homework(student_id):
 
         paper_title = export_data.get('title') or '未命名试卷'
 
-        ocr_result = ocr_client.ocr_image(save_path)
-        ocr_text = ocr_result.get('markdown') or ocr_result.get('text') or ''
+        file_ext = os.path.splitext(filename)[1].lower()
+        if file_ext == '.pdf':
+            pages_dir = os.path.join(HOMEWORK_UPLOAD_DIR, 'pdf_pages')
+            page_image_paths = convert_pdf_to_images(save_path, pages_dir)
+            ocr_segments = []
+            for page_index, image_path in page_image_paths:
+                logger.log_system_info(f"作业OCR - PDF第{page_index}页: {image_path}")
+                page_result = ocr_client.ocr_image(image_path)
+                page_text = page_result.get('markdown') or page_result.get('text') or ''
+                if page_text:
+                    ocr_segments.append(page_text)
+            ocr_text = '\n\n'.join(ocr_segments)
+        else:
+            ocr_result = ocr_client.ocr_image(save_path)
+            ocr_text = ocr_result.get('markdown') or ocr_result.get('text') or ''
 
         llm_results = student_manager.parse_homework_ocr(paper_title, questions, ocr_text)
 
@@ -1027,80 +1046,82 @@ def ocr_parse():
             return jsonify({'success': False, 'message': '没有选择文件'}), 400
         
         if file and allowed_file(file.filename):
-            # 保存上传的图片到/uplaod/upload_images/
-            if not os.path.exists(os.path.join(app.config['UPLOAD_FOLDER'], 'upload_images')):
-                os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'upload_images'))
+            upload_images_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'upload_images')
+            os.makedirs(upload_images_dir, exist_ok=True)
+
             filename = secure_filename(file.filename)
             name, ext = os.path.splitext(filename)
+            ext = (ext or '').lower()
             unique_filename = f"{uuid.uuid4()}{ext}"
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], 'upload_images', unique_filename)
+            file_path = os.path.join(upload_images_dir, unique_filename)
             file.save(file_path)
-            
+
+            file_extension = ext.lstrip('.')
+            is_pdf = file_extension == 'pdf'
+
             try:
-                # 调用OCR
-                logger.log_system_info(f"开始OCR处理 - 文件: {file_path}")
-                ocr_result = ocr_client.ocr_image(file_path)
-                markdown_content = ocr_result.get('markdown', '')
-                ocr_images = ocr_result.get('images', [])
-                
-                logger.log_ocr_result(ocr_result.get('request_id', 'unknown'), markdown_content, len(ocr_images))
-                
-                # 处理OCR返回的图片数据
-                image_filename_mapping = {}  # 原始文件名 -> 本地保存路径的映射
-                if ocr_images:
-                    # 创建集中的图片目录
-                    images_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'ocr_images')
-                    if not os.path.exists(images_dir):
-                        os.makedirs(images_dir)
-                    
-                    for img_data in ocr_images:
-                        if isinstance(img_data, dict) and 'filename' in img_data and 'data' in img_data:
-                            original_filename = img_data['filename']  # 如 "0.jpg", "1.jpg"
-                            image_data = img_data['data']
-                            
-                            # 处理base64编码的图片数据
-                            if isinstance(image_data, str):
-                                # 如果是base64字符串，解码为bytes
-                                import base64
-                                image_bytes = base64.b64decode(image_data)
-                            else:
-                                # 如果已经是bytes，直接使用
-                                image_bytes = image_data
-                            
-                            # 生成唯一文件名避免重名，但保留原始扩展名
-                            name, ext = os.path.splitext(original_filename)
-                            unique_filename = f"ocr_{uuid.uuid4().hex[:8]}_{original_filename}"
-                            dest_path = os.path.join(images_dir, unique_filename)
-                            
-                            # 保存图片数据到本地
-                            with open(dest_path, 'wb') as f:
-                                f.write(image_bytes)
-                            
-                            # 记录映射关系：原始文件名 -> 本地相对路径
-                            relative_path = f"/uploads/ocr_images/{unique_filename}"
-                            image_filename_mapping[original_filename] = relative_path
-                            logger.log_image_processing(original_filename, relative_path, "保存")
-                
-                # 调用大模型解析题目，传递文件名映射关系
-                logger.log_system_info(f"开始解析试卷，markdown内容长度: {len(markdown_content)}, 可用图片数量: {len(image_filename_mapping)}")
-                
-                parsed_questions = question_manager.parse_exam_paper(markdown_content, image_filename_mapping)
+                markdown_segments = []
+                image_filename_mapping = {}
+
+                if is_pdf:
+                    logger.log_system_info(f"开始处理PDF试卷 - 文件: {file_path}")
+                    page_image_paths = convert_pdf_to_images(file_path, upload_images_dir)
+                    for page_index, image_path in page_image_paths:
+                        logger.log_system_info(f"开始OCR处理 - PDF第{page_index}页: {image_path}")
+                        ocr_result = ocr_client.ocr_image(image_path)
+                        page_markdown = ocr_result.get('markdown', '')
+                        ocr_images = ocr_result.get('images', [])
+                        logger.log_ocr_result(ocr_result.get('request_id', 'unknown'), page_markdown, len(ocr_images))
+
+                        page_mapping, replacements = save_ocr_images(
+                            ocr_images,
+                            app.config['UPLOAD_FOLDER'],
+                            logger,
+                            suffix=f"_p{page_index}",
+                        )
+                        image_filename_mapping.update(page_mapping)
+                        page_markdown = apply_filename_replacements(page_markdown, replacements)
+                        markdown_segments.append(page_markdown)
+                else:
+                    logger.log_system_info(f"开始OCR处理 - 文件: {file_path}")
+                    ocr_result = ocr_client.ocr_image(file_path)
+                    markdown_content = ocr_result.get('markdown', '')
+                    ocr_images = ocr_result.get('images', [])
+                    logger.log_ocr_result(ocr_result.get('request_id', 'unknown'), markdown_content, len(ocr_images))
+
+                    page_mapping, replacements = save_ocr_images(
+                        ocr_images,
+                        app.config['UPLOAD_FOLDER'],
+                        logger,
+                    )
+                    image_filename_mapping.update(page_mapping)
+                    markdown_segments.append(apply_filename_replacements(markdown_content, replacements))
+
+                markdown_content = '\n\n'.join(segment for segment in markdown_segments if segment)
+                logger.log_system_info(
+                    f"开始解析试卷，markdown内容长度: {len(markdown_content)}, 可用图片数量: {len(image_filename_mapping)}"
+                )
+
+                parsed_questions = question_manager.parse_exam_paper(
+                    markdown_content,
+                    image_filename_mapping,
+                    get_answer_batch_size=EXAM_PARSE_ANSWER_BATCH_SIZE if is_pdf else None,
+                )
                 logger.log_question_parsing(len(parsed_questions), "试卷解析")
-                
+
                 if not parsed_questions:
                     return jsonify({
                         'success': False,
                         'message': '试卷解析完成，但没有识别出任何题目。请检查试卷图片质量或内容格式。'
                     })
-                
+
                 return jsonify({
                     'success': True,
                     'questions': parsed_questions
                 })
-                
+
             except Exception as e:
                 return jsonify({'success': False, 'message': f'OCR解析失败: {str(e)}'}), 500
-
         else:
             return jsonify({'success': False, 'message': '不支持的文件类型'}), 400
             

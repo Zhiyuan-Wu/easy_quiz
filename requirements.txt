@@ -8,3 +8,4 @@ latex2mathml
 numpy
 faiss-cpu
 pytest
+pdf2image
