@@ -730,27 +730,24 @@ class QuestionManager:
             
             instruction_items = [
                 "去除OCR识别中的明显噪声和不合理内容，去除与题目内容无关的内容。",
-                "识别并分离每道题目。移除原有题目编号，分值信息。",
+                "识别并分离每道题目。移除原有题目编号，分值信息。重复的题目不要重复返回。",
                 "将题目内容转换为LaTeX格式，选择题选项优先使用enumerate环境。",
                 "识别题目中引用的图片（如果有），从可用图片列表中选择合适的图片，严格返回可用的图片文件列表中的文件名，不要新增前缀或移除后缀。",
                 "识别OCR文本中的表格结构（使用<table>、<tr>、<td>、<br>标签），移除这些标签并转换为标准的LaTeX table/tabular 环境，保持单元格内容。",
             ]
 
-            tag_instruction_prefix = (
-                "为每道题目生成其所考察的知识点标签并生成解答，标签可以参考："
-                if get_answer_batch_size is None
-                else "为每道题目生成其所考察的知识点标签，标签可以参考："
-            )
+            tag_instruction_prefix = "为每道题目生成三个以上的其所考察的知识点标签，包括知识领域、解题技巧、用到的公式等，标签可以参考："
+
             instruction_items.append(
                 f"{tag_instruction_prefix}{', '.join(available_tags) if available_tags else '立体几何, 导数题, 极值点偏移, 三角函数, 数列, 概率统计, 解析几何, 函数与方程, 不等式, 向量, 复数, 算法与程序框图'}"
             )
             instruction_items.append(
                 '判断每道题目的类型并返回 question_type 字段，可选值仅限 "选择题"、"填空题"、"解答题"，若无法确定请返回 "解答题"'
             )
-            if get_answer_batch_size is None:
-                instruction_items.append("返回JSON格式，包含题目列表")
-            else:
-                instruction_items.append("返回JSON格式，包含题目列表，不要包含 answer 字段")
+            if get_answer_batch_size is not None:
+                instruction_items.append("给每道题目生成详细的参考解答，包括解题步骤和最终答案")
+            instruction_items.append("返回JSON格式，包含题目列表")
+
 
             instruction_text = "\n".join(
                 f"{idx}. {item}" for idx, item in enumerate(instruction_items, start=1)

@@ -418,10 +418,11 @@ function showMessage(text, type) {
     message.className = `message ${type}`;
     message.classList.remove('hidden');
     
-    // 3秒后自动隐藏
+    // 错误类型的消息使用更长的停留时间（8秒），其他类型3秒
+    const autoHide = type === 'error' ? 8000 : 3000;
     setTimeout(() => {
         hideMessage();
-    }, 3000);
+    }, autoHide);
 }
 
 // 隐藏消息

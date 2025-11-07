@@ -39,7 +39,8 @@ window.APP_CONFIG = {
 
     // 消息提示配置
     messages: {
-        autoHideMs: 3000                 // 消息自动隐藏时间
+        autoHideMs: 3000,                // 消息自动隐藏时间（默认，用于success等类型）
+        errorAutoHideMs: 8000            // 错误消息自动隐藏时间（延长显示时间）
     }
 };
 
