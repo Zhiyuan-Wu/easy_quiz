@@ -29,7 +29,8 @@ window.APP_CONFIG = {
             gradientHeight: 24           // 渐隐高度（像素）
         },
         cartPreviewMaxChars: 120,        // 购物车题目内容预览最大字符数
-        questionPreviewMaxChars: 160     // 列表题目预览最大字符数
+        questionPreviewMaxChars: 160,    // 列表题目预览最大字符数
+        sourceMaxLength: 30              // 题目来源显示最大字符数
     },
 
     // 学生相关配置

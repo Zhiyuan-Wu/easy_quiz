@@ -868,6 +868,17 @@ textarea {
     flex-wrap: wrap;
 }
 
+.top-pagination {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.top-pagination .btn {
+    min-width: 36px;
+    padding: 8px 12px;
+}
+
 .pagination-info {
     color: #666;
     font-size: 0.9rem;

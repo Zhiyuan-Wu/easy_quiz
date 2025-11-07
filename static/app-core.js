@@ -51,6 +51,8 @@ const questionList = document.getElementById('question-list');
 const refreshBtn = document.getElementById('refresh-btn');
 const prevPageBtn = document.getElementById('prev-page');
 const nextPageBtn = document.getElementById('next-page');
+const topPrevPageBtn = document.getElementById('top-prev-page');
+const topNextPageBtn = document.getElementById('top-next-page');
 const pageInfo = document.getElementById('page-info');
 const currentCount = document.getElementById('current-count');
 const totalCount = document.getElementById('total-count');
@@ -257,6 +259,12 @@ function setupEventListeners() {
     }
     if (nextPageBtn) {
         nextPageBtn.addEventListener('click', () => changePage(1));
+    }
+    if (topPrevPageBtn) {
+        topPrevPageBtn.addEventListener('click', () => changePage(-1));
+    }
+    if (topNextPageBtn) {
+        topNextPageBtn.addEventListener('click', () => changePage(1));
     }
 
     if (questionModalClose) {
