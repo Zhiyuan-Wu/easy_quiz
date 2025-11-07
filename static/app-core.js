@@ -595,7 +595,10 @@ function showMessage(text, type = 'success') {
     message.className = `message ${type}`;
     message.classList.remove('hidden');
 
-    const autoHide = APP_CONFIG.messages?.autoHideMs ?? 3000;
+    // 错误类型的消息使用更长的停留时间
+    const autoHide = type === 'error' 
+        ? (APP_CONFIG.messages?.errorAutoHideMs ?? 8000)
+        : (APP_CONFIG.messages?.autoHideMs ?? 3000);
     if (autoHide > 0) {
         setTimeout(() => {
             hideMessage();

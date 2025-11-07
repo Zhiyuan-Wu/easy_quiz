@@ -5,11 +5,13 @@
 
 from flask import Flask, render_template, request, jsonify, send_from_directory, session, redirect, url_for
 from functools import wraps
+import base64
 import json
 import os
 import uuid
 import time
 from datetime import datetime
+from io import BytesIO
 from werkzeug.utils import secure_filename
 from question_manager import QuestionManager
 from ocr_client import DeepSeekOCRClient
@@ -28,6 +30,8 @@ from config import (
     EXAM_PARSE_ANSWER_BATCH_SIZE,
 )
 from logger import get_logger
+from pdf2image import convert_from_bytes
+import traceback
 from utils import (
     apply_filename_replacements,
     convert_pdf_to_images,
@@ -49,6 +53,45 @@ if not os.path.exists(UPLOAD_FOLDER):
 
 # 初始化日志记录器
 logger = get_logger()
+
+def log_error_with_details(e: Exception, context: str, **kwargs):
+    """记录详细的错误信息，包括traceback和变量信息。
+    
+    参数:
+        e: 异常对象。
+        context: 错误上下文描述。
+        **kwargs: 额外的变量信息。
+    
+    返回:
+        None。
+    """
+    import sys
+    exc_type, exc_value, exc_traceback = sys.exc_info()
+    traceback_str = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    
+    # 构建详细的错误信息
+    error_details = {
+        'context': context,
+        'exception_type': type(e).__name__,
+        'exception_message': str(e),
+        'traceback': traceback_str,
+    }
+    
+    # 添加额外的变量信息
+    if kwargs:
+        error_details['variables'] = {}
+        for key, value in kwargs.items():
+            try:
+                # 尝试将值转换为字符串，避免序列化问题
+                if isinstance(value, (str, int, float, bool, type(None))):
+                    error_details['variables'][key] = value
+                else:
+                    error_details['variables'][key] = str(value)
+            except Exception:
+                error_details['variables'][key] = '<无法序列化>'
+    
+    # 记录到日志
+    logger.log_error(e, f"{context} - 详细信息: {json.dumps(error_details, ensure_ascii=False, indent=2)}")
 
 # 初始化系统管理器
 system_manager = SystemManager(SYSTEM_DATABASE_PATH)
@@ -282,6 +325,7 @@ def register():
             'message': message
         })
     except Exception as e:
+        log_error_with_details(e, "用户注册API失败", username=username if 'username' in locals() else None, email=email if 'email' in locals() else None)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
@@ -307,7 +351,7 @@ def list_students():
                 payload.append(serialized)
         return jsonify({'success': True, 'students': payload})
     except Exception as e:
-        logger.log_error(e, "获取学生列表失败")
+        log_error_with_details(e, "获取学生列表失败", user_id=session.get('user_id'))
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
@@ -331,9 +375,10 @@ def add_student_api():
         student = student_manager.add_student(student_id, name, user_id)
         return jsonify({'success': True, 'student': serialize_student(student)})
     except ValueError as ve:
+        log_error_with_details(ve, "新增学生失败-参数验证", student_id=student_id, name=name, user_id=user_id)
         return jsonify({'success': False, 'message': str(ve)}), 400
     except Exception as e:
-        logger.log_error(e, "新增学生失败")
+        log_error_with_details(e, "新增学生失败", student_id=student_id, name=name, user_id=user_id)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
@@ -357,7 +402,7 @@ def get_student_history(student_id):
 
         return jsonify({'success': True, 'history': history})
     except Exception as e:
-        logger.log_error(e, f"获取学生{student_id}做题历史失败")
+        log_error_with_details(e, f"获取学生{student_id}做题历史失败", student_id=student_id, limit=limit, window_days=window_days)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
@@ -501,7 +546,9 @@ def parse_student_homework(student_id):
             'results': normalized_results,
         })
     except Exception as e:
-        logger.log_error(e, f"作业解析失败 - 学生: {student_id}")
+        log_error_with_details(e, f"作业解析失败 - 学生: {student_id}", 
+                              student_id=student_id, export_id=export_id, 
+                              student_name=student_name, filename=file.filename if 'file' in locals() else None)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
@@ -586,9 +633,13 @@ def save_student_homework(student_id):
             'student': serialize_student(refreshed_student),
         })
     except ValueError as ve:
+        log_error_with_details(ve, f"保存作业解析结果失败-参数验证 - 学生: {student_id}", 
+                              student_id=student_id, export_id=export_id_value)
         return jsonify({'success': False, 'message': str(ve)}), 400
     except Exception as e:
-        logger.log_error(e, f"保存作业解析结果失败 - 学生: {student_id}")
+        log_error_with_details(e, f"保存作业解析结果失败 - 学生: {student_id}", 
+                              student_id=student_id, export_id=export_id_value, 
+                              paper_title=paper_title, results_count=len(results) if 'results' in locals() else 0)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/students/<student_id>/report', methods=['GET'])
@@ -631,9 +682,12 @@ def get_student_report(student_id):
             'generated_at': student.get('cached_report_generated_at'),
         })
     except ValueError as ve:
+        log_error_with_details(ve, f"生成学习报告失败-参数验证 - 学生: {student_id}", 
+                              student_id=student_id, force_refresh=force_refresh)
         return jsonify({'success': False, 'message': str(ve)}), 400
     except Exception as e:
-        logger.log_error(e, f"生成学习报告失败 - 学生: {student_id}")
+        log_error_with_details(e, f"生成学习报告失败 - 学生: {student_id}", 
+                              student_id=student_id, force_refresh=force_refresh, user_id=user_id)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
@@ -664,9 +718,11 @@ def get_student_recommendations(student_id):
             'questions': recommendations,
         })
     except ValueError as ve:
+        log_error_with_details(ve, f"生成AI题目推荐失败-参数验证 - 学生: {student_id}", student_id=student_id)
         return jsonify({'success': False, 'message': str(ve)}), 400
     except Exception as e:
-        logger.log_error(e, f"生成AI题目推荐失败 - 学生: {student_id}")
+        log_error_with_details(e, f"生成AI题目推荐失败 - 学生: {student_id}", 
+                              student_id=student_id, user_id=user_id)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
@@ -694,6 +750,7 @@ def login():
                 'message': '用户名或密码错误'
             })
     except Exception as e:
+        log_error_with_details(e, "用户登录API失败", username=username if 'username' in locals() else None)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -757,6 +814,10 @@ def add_question():
         })
         
     except Exception as e:
+        log_error_with_details(e, "添加题目API失败", 
+                              user_id=session.get('user_id'), 
+                              latex_content_length=len(latex_content) if 'latex_content' in locals() else 0,
+                              tags=tags if 'tags' in locals() else None)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
@@ -795,11 +856,16 @@ def update_question(question_id):
         })
 
     except PermissionError as e:
+        log_error_with_details(e, f"更新题目失败-权限错误 - question_id: {question_id}", 
+                              question_id=question_id, current_user_id=current_user_id)
         return jsonify({'success': False, 'message': str(e)}), 403
     except ValueError as e:
+        log_error_with_details(e, f"更新题目失败-参数验证 - question_id: {question_id}", 
+                              question_id=question_id, latex_content_length=len(latex_content) if 'latex_content' in locals() else 0)
         return jsonify({'success': False, 'message': str(e)}), 400
     except Exception as e:
-        logger.log_error(e, f"更新题目失败 - question_id: {question_id}")
+        log_error_with_details(e, f"更新题目失败 - question_id: {question_id}", 
+                              question_id=question_id, current_user_id=current_user_id)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/questions/auto-tag', methods=['POST'])
@@ -835,7 +901,10 @@ def auto_tag_question():
         })
         
     except Exception as e:
-        logger.log_error(e, f"自动打标API失败 - 用户ID: {session.get('user_id')}")
+        log_error_with_details(e, f"自动打标API失败 - 用户ID: {session.get('user_id')}", 
+                              user_id=session.get('user_id'), 
+                              content_length=len(content) if 'content' in locals() else 0,
+                              source=source if 'source' in locals() else None)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/questions/search', methods=['GET'])
@@ -872,6 +941,11 @@ def search_questions():
         })
         
     except Exception as e:
+        log_error_with_details(e, "搜索题目API失败", 
+                              user_id=session.get('user_id'), 
+                              tags=tags if 'tags' in locals() else None,
+                              keyword=keyword if 'keyword' in locals() else None,
+                              page=page if 'page' in locals() else None)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/questions/<int:question_id>', methods=['GET'])
@@ -894,6 +968,8 @@ def get_question(question_id):
             }), 404
             
     except Exception as e:
+        log_error_with_details(e, f"获取单个题目详情API失败 - question_id: {question_id}", 
+                              question_id=question_id, current_user_id=current_user_id)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
@@ -928,9 +1004,12 @@ def generate_question_variant(question_id):
             'variant': variant
         })
     except ValueError as e:
+        log_error_with_details(e, f"AI变题失败-参数验证 - question_id: {question_id}", 
+                              question_id=question_id, current_user_id=current_user_id)
         return jsonify({'success': False, 'message': str(e)}), 400
     except Exception as e:
-        logger.log_error(e, f"AI变题失败 - question_id: {question_id}")
+        log_error_with_details(e, f"AI变题失败 - question_id: {question_id}", 
+                              question_id=question_id, current_user_id=current_user_id)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
@@ -946,6 +1025,8 @@ def get_question_stats():
             'stats': stats
         })
     except Exception as e:
+        log_error_with_details(e, "获取题目统计信息API失败", 
+                              current_user_id=current_user_id)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/upload', methods=['POST'])
@@ -978,6 +1059,9 @@ def upload_file():
             return jsonify({'success': False, 'message': '不支持的文件类型'}), 400
             
     except Exception as e:
+        log_error_with_details(e, "上传图片API失败", 
+                              filename=file.filename if 'file' in locals() else None,
+                              user_id=session.get('user_id'))
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/uploads/<filename>')
@@ -1008,7 +1092,7 @@ def serve_image(path):
         else:
             return jsonify({'error': 'File not found'}), 404
     except Exception as e:
-        logger.log_error(e, f"图片服务错误 - path: {path}")
+        log_error_with_details(e, f"图片服务错误 - path: {path}", path=path)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/questions/<int:question_id>', methods=['DELETE'])
@@ -1018,7 +1102,7 @@ def delete_question(question_id):
     try:
         current_user_id = session['user_id']
         success = question_manager.delete_question(question_id, current_user_id)
-        
+
         if success:
             return jsonify({
                 'success': True,
@@ -1029,9 +1113,51 @@ def delete_question(question_id):
                 'success': False,
                 'message': '题目不存在或无权删除'
             }), 404
-            
+
     except Exception as e:
+        log_error_with_details(e, f"删除题目API失败 - question_id: {question_id}", 
+                              question_id=question_id, current_user_id=current_user_id)
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/pdf-preview', methods=['POST'])
+@login_required
+def pdf_preview():
+    """生成PDF文件第一页的预览图"""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'message': '没有选择文件'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'message': '没有选择文件'}), 400
+
+    if not file.filename.lower().endswith('.pdf'):
+        return jsonify({'success': False, 'message': '仅支持PDF文件预览'}), 400
+
+    try:
+        pdf_content = file.read()
+        if not pdf_content:
+            return jsonify({'success': False, 'message': '文件内容为空'}), 400
+
+        images = convert_from_bytes(pdf_content, first_page=1, last_page=1)
+        if not images:
+            return jsonify({'success': False, 'message': '无法生成PDF预览'}), 500
+
+        preview_image = images[0]
+        buffer = BytesIO()
+        preview_image.save(buffer, format='PNG')
+        preview_data = base64.b64encode(buffer.getvalue()).decode('ascii')
+
+        return jsonify({
+            'success': True,
+            'preview': f'data:image/png;base64,{preview_data}'
+        })
+    except Exception as e:
+        log_error_with_details(e, f"生成PDF预览失败 - 文件名: {file.filename}", 
+                              filename=file.filename if 'file' in locals() else None,
+                              user_id=session.get('user_id'))
+        return jsonify({'success': False, 'message': f'无法生成PDF预览: {str(e)}'}), 500
+
 
 @app.route('/api/ocr-parse', methods=['POST'])
 @login_required
@@ -1121,11 +1247,18 @@ def ocr_parse():
                 })
 
             except Exception as e:
+                log_error_with_details(e, "OCR解析试卷失败", 
+                                      filename=file.filename if 'file' in locals() else None,
+                                      file_path=file_path if 'file_path' in locals() else None,
+                                      user_id=session.get('user_id'))
                 return jsonify({'success': False, 'message': f'OCR解析失败: {str(e)}'}), 500
         else:
             return jsonify({'success': False, 'message': '不支持的文件类型'}), 400
             
     except Exception as e:
+        log_error_with_details(e, "OCR解析API失败", 
+                              filename=file.filename if 'file' in locals() else None,
+                              user_id=session.get('user_id'))
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/tags', methods=['GET'])
@@ -1139,6 +1272,7 @@ def get_tags():
             'tags': tag_names
         })
     except Exception as e:
+        log_error_with_details(e, "获取所有可用标签API失败")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/export-paper', methods=['POST'])
@@ -1191,6 +1325,12 @@ def export_paper():
         )
         
     except Exception as e:
+        log_error_with_details(e, "导出试卷API失败", 
+                              user_id=session.get('user_id'),
+                              title=title if 'title' in locals() else None,
+                              format_type=format_type if 'format_type' in locals() else None,
+                              mode=mode if 'mode' in locals() else None,
+                              questions_count=len(questions) if 'questions' in locals() else 0)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/user/exports', methods=['GET'])
@@ -1205,6 +1345,7 @@ def get_user_exports():
             'exports': exports
         })
     except Exception as e:
+        log_error_with_details(e, "获取用户导出记录API失败", user_id=user_id)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/user/reset-password', methods=['POST'])
@@ -1224,6 +1365,7 @@ def reset_password():
             'message': message
         })
     except Exception as e:
+        log_error_with_details(e, "重置密码API失败", user_id=user_id)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/user/re-export/<int:export_id>', methods=['GET'])
@@ -1250,6 +1392,8 @@ def get_re_export_data(export_id):
             'questions': questions
         })
     except Exception as e:
+        log_error_with_details(e, f"获取重新导出数据API失败 - export_id: {export_id}", 
+                              export_id=export_id, user_id=user_id)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 

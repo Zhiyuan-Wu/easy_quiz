@@ -58,6 +58,10 @@ class ExportRenderer:
             None。
         """
         self.upload_folder = upload_folder
+        # 创建exports文件夹用于保存导出的文件
+        self.exports_folder = "exports"
+        if not os.path.exists(self.exports_folder):
+            os.makedirs(self.exports_folder, exist_ok=True)
     
     def render_latex(self, questions: List[Dict], mode: str, title: str, return_metadata: bool = False):
         """生成 LaTeX 格式的试卷内容。
@@ -294,7 +298,7 @@ class ExportRenderer:
                 current_index += 1
 
         filename = f'paper_{uuid.uuid4().hex[:8]}.docx'
-        file_path = os.path.join(self.upload_folder, filename)
+        file_path = os.path.join(self.exports_folder, filename)
         doc.save(file_path)
 
         return file_path
@@ -345,7 +349,7 @@ class ExportRenderer:
             if result.get("success") and result.get("pdf_base64"):
                 # 解码PDF并保存
                 pdf_filename = f'paper_{uuid.uuid4().hex[:8]}.pdf'
-                pdf_path = os.path.join(self.upload_folder, pdf_filename)
+                pdf_path = os.path.join(self.exports_folder, pdf_filename)
                 
                 pdf_data = base64.b64decode(result["pdf_base64"])
                 with open(pdf_path, 'wb') as f:

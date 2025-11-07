@@ -6,6 +6,8 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import Iterable, Tuple
+import sys
+sys.path.append("../easy_quiz")
 
 from config import EXAM_PARSE_ANSWER_BATCH_SIZE, SYSTEM_DATABASE_PATH
 from logger import get_logger
@@ -16,7 +18,6 @@ from utils import apply_filename_replacements, convert_pdf_to_images, save_ocr_i
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "bmp", "pdf"}
 UPLOAD_ROOT = Path("uploads")
-
 
 def iter_input_files(root: Path) -> Iterable[Path]:
     """Yield all supported files under the given directory recursively."""
@@ -141,8 +142,14 @@ def main() -> None:
         default=None,
         help="最多解析的文件数量（默认不限制）",
     )
+    parser.add_argument(
+        "--blackwords",
+        type=str,
+        default="",
+        help="跳过文件名中包含blackword的文件，逗号分隔",
+    )
     args = parser.parse_args()
-
+    blackwords = args.blackwords.split(",") if args.blackwords else []
     input_dir: Path = args.input_dir
     if not input_dir.exists() or not input_dir.is_dir():
         raise SystemExit(f"输入目录不存在或不是有效目录: {input_dir}")
@@ -158,6 +165,9 @@ def main() -> None:
     for file_path in iter_input_files(input_dir):
         if args.limit is not None and processed_files >= args.limit:
             break
+
+        if any(blackword in file_path.name for blackword in blackwords):
+            continue
 
         try:
             created = process_file(file_path, question_manager, ocr_client, logger)

@@ -61,7 +61,12 @@
         <!-- 查询题目页面 -->
         <div id="search-tab" class="tab-content active">
             <div class="card">
-                <h2><i class="fas fa-search"></i> 查询题目</h2>
+                <h2 class="heading-with-help">
+                    <span><i class="fas fa-search"></i> 查询题目</span>
+                    <button type="button" class="help-trigger" data-help-key="searchPage" aria-label="查询题目功能帮助">
+                        <i class="fas fa-circle-question"></i>
+                    </button>
+                </h2>
                 
                 <!-- Google风格搜索框 -->
                 <div class="google-search-container">
@@ -93,7 +98,12 @@
         <!-- 试卷解析页面 -->
         <div id="ocr-tab" class="tab-content">
             <div class="card">
-                <h2><i class="fas fa-file-upload"></i> 试卷扫描</h2>
+                <h2 class="heading-with-help">
+                    <span><i class="fas fa-file-upload"></i> 试卷扫描</span>
+                    <button type="button" class="help-trigger" data-help-key="ocrPage" aria-label="试卷扫描功能帮助">
+                        <i class="fas fa-circle-question"></i>
+                    </button>
+                </h2>
                 
                 <div class="form-group" style="margin-bottom: 20px;">
                     <label>
@@ -121,13 +131,13 @@
                 </div>
 
                 <div class="ocr-upload-area">
-                    <div class="upload-zone" id="upload-zone">
+                        <div class="upload-zone" id="upload-zone">
                         <div class="upload-icon">
                             <i class="fas fa-cloud-upload-alt"></i>
                         </div>
-                        <h3>点击或拖拽上传试卷图片</h3>
-                        <p>支持 PNG、JPG、JPEG 格式，最大 16MB</p>
-                        <input type="file" id="exam-upload" accept="image/*" style="display: none;">
+                            <h3>点击或拖拽上传试卷文件</h3>
+                            <p>支持 PNG、JPG、JPEG、PDF 格式，最大 16MB</p>
+                            <input type="file" id="exam-upload" accept="image/*,application/pdf" style="display: none;">
                         <button type="button" id="exam-upload-btn" class="btn btn-primary">
                             <i class="fas fa-upload"></i> 选择文件
                         </button>
@@ -135,11 +145,20 @@
                     
                     <div id="exam-preview" class="exam-preview" style="display: none;">
                         <div class="preview-header">
-                            <h4><i class="fas fa-image"></i> 试卷预览</h4>
+                                <h4 class="heading-with-help">
+                                    <span><i class="fas fa-image"></i> 试卷预览</span>
+                                    <button type="button" class="help-trigger" data-help-key="ocrPreview" aria-label="试卷预览帮助">
+                                        <i class="fas fa-circle-question"></i>
+                                    </button>
+                                </h4>
                             <button type="button" id="remove-exam-btn" class="btn btn-danger btn-sm">
                                 <i class="fas fa-times"></i> 移除
                             </button>
                         </div>
+                            <div class="preview-meta">
+                                <span class="preview-filename"></span>
+                                <span class="preview-filetype"></span>
+                            </div>
                         <div class="preview-image"></div>
                         <button type="button" id="parse-exam-btn" class="btn btn-primary">
                             <i class="fas fa-cogs"></i> 开始解析
@@ -150,7 +169,12 @@
                 <!-- 解析结果 -->
                 <div id="parsed-questions" class="parsed-questions" style="display: none;">
                     <div class="parsed-header">
-                        <h4><i class="fas fa-list-alt"></i> 解析结果</h4>
+                            <h4 class="heading-with-help">
+                                <span><i class="fas fa-list-alt"></i> 解析结果</span>
+                                <button type="button" class="help-trigger" data-help-key="ocrParsedSection" aria-label="解析结果帮助">
+                                    <i class="fas fa-circle-question"></i>
+                                </button>
+                            </h4>
                         <div class="parsed-stats">
                             共解析出 <span id="parsed-count">0</span> 道题目
                         </div>
@@ -169,7 +193,12 @@
         <div id="manage-tab" class="tab-content">
             <div class="card">
                 <div class="manage-header">
-                    <h2><i class="fas fa-list"></i> 题目管理</h2>
+                    <h2 class="heading-with-help">
+                        <span><i class="fas fa-list"></i> 题目管理</span>
+                        <button type="button" class="help-trigger" data-help-key="managePage" aria-label="题目管理功能帮助">
+                            <i class="fas fa-circle-question"></i>
+                        </button>
+                    </h2>
                     <div class="manage-controls">
                         <button id="open-add-question-modal" class="btn btn-primary">
                             <i class="fas fa-plus"></i> 增加题目
@@ -203,7 +232,12 @@
         <div id="students-tab" class="tab-content">
             <div class="card">
                 <div class="students-header">
-                    <h2><i class="fas fa-user-graduate"></i> 学生管理</h2>
+                    <h2 class="heading-with-help">
+                        <span><i class="fas fa-user-graduate"></i> 学生管理</span>
+                        <button type="button" class="help-trigger" data-help-key="studentsPage" aria-label="学生管理功能帮助">
+                            <i class="fas fa-circle-question"></i>
+                        </button>
+                    </h2>
                     <div class="students-controls">
                         <button id="reload-students-btn" class="btn btn-secondary">
                             <i class="fas fa-refresh"></i> 刷新
@@ -242,7 +276,12 @@
     <div id="add-question-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-plus"></i> 增加题目</h3>
+                <h3 class="heading-with-help">
+                    <span><i class="fas fa-plus"></i> 增加题目</span>
+                    <button type="button" class="help-trigger" data-help-key="addQuestionModal" aria-label="增加题目帮助">
+                        <i class="fas fa-circle-question"></i>
+                    </button>
+                </h3>
                 <button class="modal-close" data-close="add-question-modal">&times;</button>
             </div>
             <div class="modal-body">
@@ -348,7 +387,12 @@
     <div id="add-student-modal" class="modal">
         <div class="modal-content small-modal">
             <div class="modal-header">
-                <h3><i class="fas fa-user-plus"></i> 添加学生</h3>
+                <h3 class="heading-with-help">
+                    <span><i class="fas fa-user-plus"></i> 添加学生</span>
+                    <button type="button" class="help-trigger" data-help-key="addStudentModal" aria-label="添加学生帮助">
+                        <i class="fas fa-circle-question"></i>
+                    </button>
+                </h3>
                 <button class="modal-close" data-close="add-student-modal">&times;</button>
             </div>
             <div class="modal-body">
@@ -378,7 +422,12 @@
     <div id="homework-modal" class="modal">
         <div class="modal-content homework-modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-file-signature"></i> 提交作业</h3>
+                <h3 class="heading-with-help">
+                    <span><i class="fas fa-file-signature"></i> 提交作业</span>
+                    <button type="button" class="help-trigger" data-help-key="homeworkModal" aria-label="提交作业帮助">
+                        <i class="fas fa-circle-question"></i>
+                    </button>
+                </h3>
                 <button class="modal-close" data-close="homework-modal">&times;</button>
             </div>
             <div class="modal-body">
@@ -450,7 +499,12 @@
     <div id="history-modal" class="modal">
         <div class="modal-content medium-modal">
             <div class="modal-header">
-                <h3><i class="fas fa-clock-rotate-left"></i> 做题历史</h3>
+                <h3 class="heading-with-help">
+                    <span><i class="fas fa-clock-rotate-left"></i> 做题历史</span>
+                    <button type="button" class="help-trigger" data-help-key="historyModal" aria-label="做题历史帮助">
+                        <i class="fas fa-circle-question"></i>
+                    </button>
+                </h3>
                 <button class="modal-close" data-close="history-modal">&times;</button>
             </div>
             <div class="modal-body">
@@ -463,7 +517,12 @@
     <div id="report-modal" class="modal">
         <div class="modal-content report-modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-chart-line"></i> 学习报告</h3>
+                <h3 class="heading-with-help">
+                    <span><i class="fas fa-chart-line"></i> 学习报告</span>
+                    <button type="button" class="help-trigger" data-help-key="reportModal" aria-label="学习报告帮助">
+                        <i class="fas fa-circle-question"></i>
+                    </button>
+                </h3>
                 <div class="report-actions">
                     <button id="refresh-report-btn" class="btn btn-secondary">
                         <i class="fas fa-arrows-rotate"></i> 重新生成
@@ -492,7 +551,12 @@
     <div id="recommendation-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-wand-magic-sparkles"></i> AI 题目推荐</h3>
+                <h3 class="heading-with-help">
+                    <span><i class="fas fa-wand-magic-sparkles"></i> AI 题目推荐</span>
+                    <button type="button" class="help-trigger" data-help-key="recommendationModal" aria-label="AI 题目推荐帮助">
+                        <i class="fas fa-circle-question"></i>
+                    </button>
+                </h3>
                 <button class="modal-close" data-close="recommendation-modal">&times;</button>
             </div>
             <div class="modal-body">
@@ -506,7 +570,12 @@
     <div id="question-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>题目详情</h3>
+                <h3 class="heading-with-help">
+                    <span>题目详情</span>
+                    <button type="button" class="help-trigger" data-help-key="questionModal" aria-label="题目详情帮助">
+                        <i class="fas fa-circle-question"></i>
+                    </button>
+                </h3>
                 <button class="modal-close">&times;</button>
             </div>
             <div class="modal-body">
@@ -552,7 +621,12 @@
     <div id="cart-modal" class="modal">
         <div class="modal-content cart-modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-shopping-cart"></i> 生成试卷</h3>
+                <h3 class="heading-with-help">
+                    <span><i class="fas fa-shopping-cart"></i> 生成试卷</span>
+                    <button type="button" class="help-trigger" data-help-key="cartModal" aria-label="生成试卷帮助">
+                        <i class="fas fa-circle-question"></i>
+                    </button>
+                </h3>
                 <button class="modal-close" id="cart-modal-close">&times;</button>
             </div>
             <div class="modal-body">
@@ -610,6 +684,19 @@
         </div>
     </div>
 
+    <!-- 帮助模态框 -->
+    <div id="help-modal" class="modal">
+        <div class="modal-content small-modal help-modal-content">
+            <div class="modal-header">
+                <h3 id="help-modal-title">使用帮助</h3>
+                <button class="modal-close" data-close="help-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="help-modal-body" class="help-modal-body"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- 加载提示 -->
     <div id="loading" class="loading hidden">
         <div class="loading-spinner"></div>
@@ -623,10 +710,12 @@
     </div>
 
     <script src="/static/config.js"></script>
+    <script src="/static/help-content.js"></script>
     <script src="/static/app-core.js"></script>
     <script src="/static/questions.js"></script>
     <script src="/static/ocr.js"></script>
     <script src="/static/students.js"></script>
     <script src="/static/cart.js"></script>
+    <script src="/static/help.js"></script>
 </body>
 </html>

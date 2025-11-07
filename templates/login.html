@@ -453,9 +453,11 @@
             message.textContent = text;
             message.className = `message ${type} show`;
             
+            // 错误类型的消息使用更长的停留时间（8秒），其他类型5秒
+            const autoHide = type === 'error' ? 8000 : 5000;
             setTimeout(() => {
                 hideMessage();
-            }, 5000);
+            }, autoHide);
         }
 
         function hideMessage() {
