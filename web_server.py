@@ -5,10 +5,8 @@
 
 from flask import Flask, render_template, request, jsonify, send_from_directory, session, redirect, url_for
 from functools import wraps
-from pdf2image import convert_from_path
 import json
 import os
-import base64
 import uuid
 import time
 from datetime import datetime
@@ -30,6 +28,11 @@ from config import (
     EXAM_PARSE_ANSWER_BATCH_SIZE,
 )
 from logger import get_logger
+from utils import (
+    apply_filename_replacements,
+    convert_pdf_to_images,
+    save_ocr_images,
+)
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
@@ -105,71 +108,6 @@ def allowed_file(filename):
         若扩展名合法返回 True，否则返回 False。
     """
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-def _save_ocr_images(ocr_images, suffix=""):
-    """保存OCR返回的图片数据并构建文件名映射。"""
-    image_mapping = {}
-    replacements = {}
-    if not ocr_images:
-        return image_mapping, replacements
-
-    images_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'ocr_images')
-    os.makedirs(images_dir, exist_ok=True)
-
-    for img_data in ocr_images:
-        if not isinstance(img_data, dict):
-            continue
-        original_filename = (img_data.get('filename') or '').strip()
-        image_data = img_data.get('data')
-        if not original_filename or image_data is None:
-            continue
-
-        name, ext = os.path.splitext(original_filename)
-        ext = ext if ext else '.png'
-        if not ext.startswith('.'):
-            ext = f'.{ext}'
-        new_filename = f"{name}{suffix}{ext}"
-        unique_filename = f"ocr_{uuid.uuid4().hex[:8]}_{new_filename}"
-        dest_path = os.path.join(images_dir, unique_filename)
-
-        if isinstance(image_data, str):
-            image_bytes = base64.b64decode(image_data)
-        else:
-            image_bytes = image_data
-
-        with open(dest_path, 'wb') as f:
-            f.write(image_bytes)
-
-        relative_path = f"/uploads/ocr_images/{unique_filename}"
-        image_mapping[new_filename] = relative_path
-        replacements[f"images/{original_filename}"] = f"images/{new_filename}"
-        replacements[original_filename] = new_filename
-        logger.log_image_processing(original_filename, relative_path, "保存")
-
-    return image_mapping, replacements
-
-
-def _apply_filename_replacements(text, replacements):
-    """在文本中应用文件名替换。"""
-    if not text or not replacements:
-        return text
-    for target, new_value in sorted(replacements.items(), key=lambda item: -len(item[0])):
-        text = text.replace(target, new_value)
-    return text
-
-
-def _convert_pdf_to_images(pdf_path, output_dir):
-    """将PDF转换为逐页图片并返回(页码, 图片路径)列表。"""
-    os.makedirs(output_dir, exist_ok=True)
-    pages = convert_from_path(pdf_path)
-    results = []
-    for index, image in enumerate(pages, start=1):
-        filename = f"pdf_{uuid.uuid4().hex[:8]}_page{index}.png"
-        dest_path = os.path.join(output_dir, filename)
-        image.save(dest_path, 'PNG')
-        results.append((index, dest_path))
-    return results
 
 
 def parse_iso_datetime(value):
@@ -487,7 +425,7 @@ def parse_student_homework(student_id):
         file_ext = os.path.splitext(filename)[1].lower()
         if file_ext == '.pdf':
             pages_dir = os.path.join(HOMEWORK_UPLOAD_DIR, 'pdf_pages')
-            page_image_paths = _convert_pdf_to_images(save_path, pages_dir)
+            page_image_paths = convert_pdf_to_images(save_path, pages_dir)
             ocr_segments = []
             for page_index, image_path in page_image_paths:
                 logger.log_system_info(f"作业OCR - PDF第{page_index}页: {image_path}")
@@ -1127,7 +1065,7 @@ def ocr_parse():
 
                 if is_pdf:
                     logger.log_system_info(f"开始处理PDF试卷 - 文件: {file_path}")
-                    page_image_paths = _convert_pdf_to_images(file_path, upload_images_dir)
+                    page_image_paths = convert_pdf_to_images(file_path, upload_images_dir)
                     for page_index, image_path in page_image_paths:
                         logger.log_system_info(f"开始OCR处理 - PDF第{page_index}页: {image_path}")
                         ocr_result = ocr_client.ocr_image(image_path)
@@ -1135,9 +1073,14 @@ def ocr_parse():
                         ocr_images = ocr_result.get('images', [])
                         logger.log_ocr_result(ocr_result.get('request_id', 'unknown'), page_markdown, len(ocr_images))
 
-                        page_mapping, replacements = _save_ocr_images(ocr_images, suffix=f"_p{page_index}")
+                        page_mapping, replacements = save_ocr_images(
+                            ocr_images,
+                            app.config['UPLOAD_FOLDER'],
+                            logger,
+                            suffix=f"_p{page_index}",
+                        )
                         image_filename_mapping.update(page_mapping)
-                        page_markdown = _apply_filename_replacements(page_markdown, replacements)
+                        page_markdown = apply_filename_replacements(page_markdown, replacements)
                         markdown_segments.append(page_markdown)
                 else:
                     logger.log_system_info(f"开始OCR处理 - 文件: {file_path}")
@@ -1146,9 +1089,13 @@ def ocr_parse():
                     ocr_images = ocr_result.get('images', [])
                     logger.log_ocr_result(ocr_result.get('request_id', 'unknown'), markdown_content, len(ocr_images))
 
-                    page_mapping, replacements = _save_ocr_images(ocr_images)
+                    page_mapping, replacements = save_ocr_images(
+                        ocr_images,
+                        app.config['UPLOAD_FOLDER'],
+                        logger,
+                    )
                     image_filename_mapping.update(page_mapping)
-                    markdown_segments.append(_apply_filename_replacements(markdown_content, replacements))
+                    markdown_segments.append(apply_filename_replacements(markdown_content, replacements))
 
                 markdown_content = '\n\n'.join(segment for segment in markdown_segments if segment)
                 logger.log_system_info(

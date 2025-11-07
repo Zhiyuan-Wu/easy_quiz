@@ -733,6 +733,7 @@ class QuestionManager:
                 "识别并分离每道题目。移除原有题目编号，分值信息。",
                 "将题目内容转换为LaTeX格式，选择题选项优先使用enumerate环境。",
                 "识别题目中引用的图片（如果有），从可用图片列表中选择合适的图片，严格返回可用的图片文件列表中的文件名，不要新增前缀或移除后缀。",
+                "识别OCR文本中的表格结构（使用<table>、<tr>、<td>、<br>标签），移除这些标签并转换为标准的LaTeX table/tabular 环境，保持单元格内容与换行。",
             ]
 
             tag_instruction_prefix = (
@@ -749,27 +750,29 @@ class QuestionManager:
             if get_answer_batch_size is None:
                 instruction_items.append("返回JSON格式，包含题目列表")
             else:
-                instruction_items.append("返回JSON格式，包含题目列表，并将每道题目的 answer 字段保留为空字符串")
+                instruction_items.append("返回JSON格式，包含题目列表，不要包含 answer 字段")
 
             instruction_text = "\n".join(
                 f"{idx}. {item}" for idx, item in enumerate(instruction_items, start=1)
             )
 
-            answer_placeholder = '"详细的参考解答"' if get_answer_batch_size is None else '""'
-            json_template = textwrap.dedent(
-                f"""{{
-    "questions": [
-        {{
-            "question": "LaTeX格式的题目内容",
-            "image": ["图片路径1", "图片路径2"],
-            "tags": ["标签1", "标签2"],
-            "answer": {answer_placeholder},
-            "question_type": "解答题"
-        }}
-    ]
-}}
-"""
-            ).strip()
+            json_lines = [
+                "{",
+                '    "questions": [',
+                "        {",
+                '            "question": "LaTeX格式的题目内容",',
+                '            "image": ["图片路径1", "图片路径2"],',
+                '            "tags": ["标签1", "标签2"],',
+            ]
+            if get_answer_batch_size is None:
+                json_lines.append('            "answer": "详细的参考解答",')
+            json_lines.append('            "question_type": "解答题"')
+            json_lines.extend([
+                "        }",
+                "    ]",
+                "}",
+            ])
+            json_template = textwrap.dedent("\n".join(json_lines)).strip()
 
             prompt = textwrap.dedent(
                 f"""请分析以下试卷内容，提取所有题目并格式化为LaTeX格式。
@@ -844,36 +847,35 @@ class QuestionManager:
                     
                     validated_questions.append(validated_question)
 
+                if (
+                    get_answer_batch_size is not None
+                    and isinstance(get_answer_batch_size, int)
+                    and get_answer_batch_size != 0
+                    and validated_questions
+                ):
+                    batch_size = max(1, abs(get_answer_batch_size))
 
-            if (
-                get_answer_batch_size is not None
-                and isinstance(get_answer_batch_size, int)
-                and get_answer_batch_size != 0
-                and validated_questions
-            ):
-                batch_size = max(1, abs(get_answer_batch_size))
-
-                def _build_answer_prompt(batch_indices):
-                    lines = []
-                    for idx in batch_indices:
-                        question_payload = validated_questions[idx]
-                        display_index = idx + 1
-                        tags_text = ', '.join(question_payload.get('tags', [])) or '无'
-                        images_text = ', '.join(question_payload.get('image', [])) or '无'
-                        lines.append(
-                            textwrap.dedent(
-                                f"""题目 {display_index}:
+                    def _build_answer_prompt(batch_indices):
+                        lines = []
+                        for idx in batch_indices:
+                            question_payload = validated_questions[idx]
+                            display_index = idx + 1
+                            tags_text = ', '.join(question_payload.get('tags', [])) or '无'
+                            images_text = ', '.join(question_payload.get('image', [])) or '无'
+                            lines.append(
+                                textwrap.dedent(
+                                    f"""题目 {display_index}:
 题型: {question_payload.get('question_type', '解答题')}
 标签: {tags_text}
 图片: {images_text}
 LaTeX题面:
 {question_payload.get('question', '')}
 """
-                            ).strip()
-                        )
-                    question_block = '\\n\\n'.join(lines)
-                    return textwrap.dedent(
-                        f"""你是一名资深的数学教师，请为以下题目生成严格、条理清晰的参考解答。请保持与提供的题目序号一致，不要输出额外说明或重复题面。
+                                ).strip()
+                            )
+                        question_block = '\n\n'.join(lines)
+                        return textwrap.dedent(
+                            f"""你是一名资深的数学教师，请为以下题目生成严格、条理清晰的参考解答。请保持与提供的题目序号一致，不要输出额外说明或重复题面。
 
 请按照下述JSON格式回复：
 {{
@@ -888,69 +890,69 @@ LaTeX题面:
 题目列表：
 {question_block}
 """
-                    ).strip()
+                        ).strip()
 
-                def _request_answers_for_batch(batch_indices, batch_number):
-                    batch_prompt = _build_answer_prompt(batch_indices)
-                    context_name = f"试卷答案生成-批次{batch_number}"
-                    self.logger.log_llm_prompt(batch_prompt, context_name)
-                    response = self.llm_client.chat.completions.create(
-                        model=LLM_CONFIG["model"],
-                        messages=[{"role": "user", "content": batch_prompt}]
-                    )
-                    content = response.choices[0].message.content
-                    self.logger.log_llm_response(content, context_name)
+                    def _request_answers_for_batch(batch_indices, batch_number):
+                        batch_prompt = _build_answer_prompt(batch_indices)
+                        context_name = f"试卷答案生成-批次{batch_number}"
+                        self.logger.log_llm_prompt(batch_prompt, context_name)
+                        response = self.llm_client.chat.completions.create(
+                            model=LLM_CONFIG["model"],
+                            messages=[{"role": "user", "content": batch_prompt}]
+                        )
+                        content = response.choices[0].message.content
+                        self.logger.log_llm_response(content, context_name)
 
-                    try:
-                        match = re.search(r'\{.*\}', content, re.DOTALL)
-                        if not match:
-                            raise ValueError("未找到JSON结构")
-                        payload_text = repair_json(match.group(0))
-                        payload = json.loads(payload_text)
-                    except Exception as exc:
-                        self.logger.log_error(exc, f"解析批次 {batch_number} 答案失败")
-                        return {}
-
-                    answers_data = payload.get('answers', [])
-                    mapping = {}
-                    for item in answers_data:
-                        if not isinstance(item, dict):
-                            continue
                         try:
-                            question_index = int(item.get('question_index')) - 1
-                        except (TypeError, ValueError):
-                            continue
-                        answer_text = item.get('answer')
-                        if not isinstance(answer_text, str):
-                            continue
-                        mapping[question_index] = answer_text.strip()
-                    return mapping
-
-                batches = [
-                    list(range(start, min(start + batch_size, len(validated_questions))))
-                    for start in range(0, len(validated_questions), batch_size)
-                ]
-
-                answers_collected = {}
-                max_workers = min(len(batches), 4) or 1
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    future_to_meta = {
-                        executor.submit(_request_answers_for_batch, batch_indices, batch_number): (batch_number, batch_indices)
-                        for batch_number, batch_indices in enumerate(batches, start=1)
-                    }
-                    for future in as_completed(future_to_meta):
-                        batch_number, batch_indices = future_to_meta[future]
-                        try:
-                            batch_answers = future.result()
-                            answers_collected.update(batch_answers)
+                            match = re.search(r'\{.*\}', content, re.DOTALL)
+                            if not match:
+                                raise ValueError("未找到JSON结构")
+                            payload_text = repair_json(match.group(0))
+                            payload = json.loads(payload_text)
                         except Exception as exc:
-                            self.logger.log_error(exc, f"批次 {batch_number} 答案生成任务异常")
+                            self.logger.log_error(exc, f"解析批次 {batch_number} 答案失败")
+                            return {}
 
-                for idx, answer_text in answers_collected.items():
-                    if 0 <= idx < len(validated_questions) and answer_text:
-                        validated_questions[idx]['answer'] = answer_text
+                        answers_data = payload.get('answers', [])
+                        mapping = {}
+                        for item in answers_data:
+                            if not isinstance(item, dict):
+                                continue
+                            try:
+                                question_index = int(item.get('question_index')) - 1
+                            except (TypeError, ValueError):
+                                continue
+                            answer_text = item.get('answer')
+                            if not isinstance(answer_text, str):
+                                continue
+                            mapping[question_index] = answer_text.strip()
+                        return mapping
 
-            duration = time.time() - start_time
+                    batches = [
+                        list(range(start, min(start + batch_size, len(validated_questions))))
+                        for start in range(0, len(validated_questions), batch_size)
+                    ]
+
+                    answers_collected = {}
+                    max_workers = min(len(batches), 4) or 1
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        future_to_meta = {
+                            executor.submit(_request_answers_for_batch, batch_indices, batch_number): (batch_number, batch_indices)
+                            for batch_number, batch_indices in enumerate(batches, start=1)
+                        }
+                        for future in as_completed(future_to_meta):
+                            batch_number, batch_indices = future_to_meta[future]
+                            try:
+                                batch_answers = future.result()
+                                answers_collected.update(batch_answers)
+                            except Exception as exc:
+                                self.logger.log_error(exc, f"批次 {batch_number} 答案生成任务异常")
+
+                    for idx, answer_text in answers_collected.items():
+                        if 0 <= idx < len(validated_questions) and answer_text:
+                            validated_questions[idx]['answer'] = answer_text
+
+                duration = time.time() - start_time
                 self.logger.log_performance("试卷解析", duration, f"解析出 {len(validated_questions)} 道题目")
                 self.logger.log_question_parsing(len(validated_questions), "试卷解析")
                 
