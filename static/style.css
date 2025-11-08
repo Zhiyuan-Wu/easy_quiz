@@ -1643,7 +1643,7 @@ mjx-container[display="true"] {
 }
 
 .math-enumerate .math-item::before {
-    content: counter(math-counter) ". ";
+    content: counter(math-counter, upper-alpha) ". ";
     font-weight: bold;
     color: #333;
     margin-right: 0.5em;
