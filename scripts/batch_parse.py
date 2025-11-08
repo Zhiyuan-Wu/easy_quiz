@@ -151,6 +151,12 @@ def main() -> None:
         default="",
         help="跳过文件名中包含blackword的文件，逗号分隔",
     )
+    parser.add_argument(
+        "--skipnum",
+        type=int,
+        default=0,
+        help="跳过前n个文件",
+    )
     args = parser.parse_args()
     blackwords = args.blackwords.split(",") if args.blackwords else []
     input_dir: Path = args.input_dir
@@ -172,11 +178,15 @@ def main() -> None:
         if any(blackword in file_path.name for blackword in blackwords):
             continue
 
+        if processed_files < args.skipnum:
+            processed_files += 1
+            continue
+
         try:
             created = process_file(file_path, question_manager, ocr_client, logger)
             created_questions += created
             processed_files += 1
-            logger.log_system_info(f"批量解析完成: {file_path}，新增题目 {created} 道")
+            logger.log_system_info(f"批量解析完成: {file_path}，新增题目 {created} 道，已处理文件 {processed_files} 个")
         except Exception as exc:
             logger.log_error(exc, f"批量解析失败 - 文件: {file_path}")
 
