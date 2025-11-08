@@ -772,6 +772,31 @@ class QuestionManager:
             ])
             json_template = textwrap.dedent("\n".join(json_lines)).strip()
 
+            examples = r"""
+{
+    "questions": [
+    {
+        "question": "已知三棱柱 $ABC-A_1B_1C_1$ 的侧棱与底面边长都相等，$A_1$ 在底面 $ABC$ 内的射影为 $\\triangle ABC$ 的中心，则 $AB_1$ 与底面 $ABC$ 所成角的正弦值等于( )\n\\begin{enumerate}\n\\item $\\frac{1}{3}$\n\\item $\\frac{\\sqrt{2}}{3}$\n\\item $\\frac{\\sqrt{3}}{3}$\n\\item $\\frac{2}{3}$\n\\end{enumerate}",
+        "image": ["0_p2.jpg"],
+        "tags": ["立体几何", "线面角", "空间几何"],
+        "question_type": "选择题"
+    },
+    {
+        "question": "已知抛物线 $y = ax^{2} - 1$ 的焦点是坐标原点，则以抛物线与两坐标轴的三个交点为顶点的三角形面积为$\\underline{\\hspace{1cm}}$。",
+        "image": [],
+        "tags": ["解析几何", "抛物线", "三角形面积"],
+        "question_type": "填空题"
+    },
+    {
+        "question": "四棱锥 $A-BCDE$ 中，底面 $BCDE$ 为矩形，侧面 $ABC\\perp$ 底面 $BCDE$，$BC=2$，$CD=\\sqrt{2}$，$AB=AC$。\n\n(I) 证明：$AD\\perp CE$；\n\n(II) 设 $CE$ 与平面 $ABE$ 所成的角为 $45^{\\circ}$，求二面角 $C-AD-E$ 的大小。",
+        "image": ["0_p3.jpg"],
+        "tags": ["立体几何", "空间向量", "线面垂直", "二面角"],
+        "question_type": "解答题"
+    }
+    ]
+}
+"""
+
             prompt = textwrap.dedent(
                 f"""请分析以下试卷内容，提取所有题目并格式化为LaTeX格式。
 
@@ -783,6 +808,11 @@ class QuestionManager:
 
 请按以下JSON格式回复：
 {json_template}
+
+请参考以下示例：
+{examples}
+
+你的解析结果（JSON格式）：
 """
             ).strip()
 
