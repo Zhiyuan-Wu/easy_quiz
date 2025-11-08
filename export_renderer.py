@@ -390,7 +390,7 @@ class ExportRenderer:
                 image_filenames.append(filename)
 
         if image_filenames:
-            image_block = "\\par\n".join(
+            image_block = "\n".join(
                 f"\\includegraphics[width=0.32\\textwidth]{{{name}}}" for name in image_filenames
             )
             question_text = question_body or '\\textit{（本题内容暂缺）}'

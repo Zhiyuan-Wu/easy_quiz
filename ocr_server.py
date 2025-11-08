@@ -307,13 +307,13 @@ def compile_latex():
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Compilation timeout"}), 500
     except Exception as e:
+        print(f"Error: {e}")
         return jsonify({"error": str(e)}), 500
-    finally:
-        # 清理临时目录
-        try:
-            shutil.rmtree(temp_dir)
-        except:
-            pass
+    # 执行成功时清理临时目录
+    try:
+        shutil.rmtree(temp_dir)
+    except:
+        pass
 
 
 if __name__ == '__main__':
