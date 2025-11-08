@@ -544,6 +544,30 @@ function postProcessLatexContent(content) {
         processed = processed.replace(/\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}/g, '');
     }
     
+    // 替换 \underline{\hspace{长度}} 为下划线
+    // 匹配 \underline{\hspace{长度}} 并替换为下划线
+    // 计算下划线长度（1cm约等于4个字符宽度）
+    processed = processed.replace(/\\underline\{[^}]*\\hspace\{([^}]+)\}[^}]*\}/g, function(match, lengthStr) {
+        // 尝试解析长度，默认1cm=4个字符
+        let underlineLength = 4; // 默认值
+        if (lengthStr.includes('cm')) {
+            try {
+                const cmValue = parseFloat(lengthStr.replace('cm', '').trim());
+                underlineLength = Math.max(1, Math.floor(cmValue * 4));
+            } catch (e) {
+                underlineLength = 4;
+            }
+        } else if (lengthStr.includes('em')) {
+            try {
+                const emValue = parseFloat(lengthStr.replace('em', '').trim());
+                underlineLength = Math.max(1, Math.floor(emValue * 2));
+            } catch (e) {
+                underlineLength = 4;
+            }
+        }
+        return '_'.repeat(underlineLength);
+    });
+    
     return processed;
 }
 
@@ -655,7 +679,7 @@ function renderTable(colSpec, rows) {
 function renderMathContent(content) {
     if (!content) return '';
 
-    // 使用集中的后处理函数
+    // 使用集中的后处理函数（包括移除center环境、includegraphics命令和替换underline）
     let processed = postProcessLatexContent(content);
     
     // 解析table环境
