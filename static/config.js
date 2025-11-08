@@ -42,6 +42,13 @@ window.APP_CONFIG = {
     messages: {
         autoHideMs: 3000,                // 消息自动隐藏时间（默认，用于success等类型）
         errorAutoHideMs: 8000            // 错误消息自动隐藏时间（延长显示时间）
+    },
+
+    // LaTeX后处理配置（与后端config.py保持一致）
+    latexPostProcessing: {
+        enabled: true,                   // 是否启用LaTeX后处理
+        remove_center_env: true,          // 移除center环境
+        remove_includegraphics: true      // 移除includegraphics命令
     }
 };
 

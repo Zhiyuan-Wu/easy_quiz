@@ -116,13 +116,16 @@ def process_file(
         return 0
 
     created = 0
+    # 提取文件名（不含路径和扩展名）作为来源
+    source_name = source_path.stem  # stem属性自动去除扩展名
+    
     for question in parsed_questions:
         question_type = question.get("question_type", "解答题") or "解答题"
         add_id = question_manager.add_question(
             latex_content=question.get("question", ""),
             tags=question.get("tags", []),
             reference_answer=question.get("answer", ""),
-            source=str(source_path),
+            source=source_name,
             image=question.get("image", []),
             question_type=question_type,
         )

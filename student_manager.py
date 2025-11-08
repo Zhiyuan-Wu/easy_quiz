@@ -46,7 +46,7 @@ def _utc_now() -> datetime:
     返回:
         当前 UTC 时间的 datetime 对象。
     """
-    return datetime.utcnow()
+    return datetime.now(datetime.timezone.utc)
 
 
 def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:

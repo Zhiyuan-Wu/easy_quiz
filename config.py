@@ -84,3 +84,10 @@ REPORT_MAX_ITEMS = 20  # 生成报告时的题目上限
 AI_RECOMMENDATION_LIMIT = 6  # 推荐题目数量
 AVERAGE_CACHE_TTL_SECONDS = 6 * 3600  # 平均分缓存有效期，防止频繁计算（可选）
 HOMEWORK_UPLOAD_DIR = "uploads/homework_submissions"
+
+# LaTeX后处理配置
+LATEX_POST_PROCESSING = {
+    "enabled": True,  # 是否启用LaTeX后处理
+    "remove_center_env": True,  # 移除center环境
+    "remove_includegraphics": True,  # 移除includegraphics命令
+}

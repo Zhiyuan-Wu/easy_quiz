@@ -1,9 +1,11 @@
 import base64
 import os
+import re
 import uuid
 from typing import Any, Dict, List, Tuple
 
 from pdf2image import convert_from_path
+from config import LATEX_POST_PROCESSING
 
 
 def save_ocr_images(
@@ -107,3 +109,31 @@ def convert_pdf_to_images(pdf_path: str, output_dir: str) -> List[Tuple[int, str
         results.append((index, dest_path))
 
     return results
+
+
+def post_process_latex_content(latex_content: str) -> str:
+    """对LaTeX内容进行后处理，移除不需要的环境和命令。
+    
+    参数:
+        latex_content: 原始LaTeX内容字符串。
+        
+    返回:
+        处理后的LaTeX内容字符串。
+    """
+    if not latex_content:
+        return ''
+    
+    if not LATEX_POST_PROCESSING.get('enabled', True):
+        return latex_content
+    
+    processed = latex_content
+    
+    # 移除 \begin{center}...\end{center} 环境（包括内容）
+    if LATEX_POST_PROCESSING.get('remove_center_env', True):
+        processed = re.sub(r'\\begin\{center\}[\s\S]*?\\end\{center\}', '', processed)
+    
+    # 移除 \includegraphics[]{} 命令（支持可选参数）
+    if LATEX_POST_PROCESSING.get('remove_includegraphics', True):
+        processed = re.sub(r'\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}', '', processed)
+    
+    return processed

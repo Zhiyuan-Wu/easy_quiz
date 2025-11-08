@@ -281,11 +281,14 @@ def compile_latex():
             if result.returncode != 0:
                 error_msg = result.stderr or result.stdout
                 print(f"Compilation error (returncode={result.returncode}): {error_msg}")
-                # 不再继续执行，编译错误应该被报告
-                return jsonify({
-                    "error": "PDF compilation failed",
-                    "details": error_msg
-                }), 500
+                # 检查PDF是否已生成，如果已生成则继续返回，否则抛出错误
+                if pdf_file.exists():
+                    print(f"Warning: Compilation returned non-zero code but PDF file exists, continuing...")
+                else:
+                    return jsonify({
+                        "error": "PDF compilation failed",
+                        "details": error_msg
+                    }), 500
         
         # 检查PDF是否生成
         if not pdf_file.exists():

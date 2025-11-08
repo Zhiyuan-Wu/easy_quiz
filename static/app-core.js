@@ -518,47 +518,192 @@ function switchTab(tabName) {
     }
 }
 
+function postProcessLatexContent(content) {
+    if (!content) return '';
+    
+    // 从配置中获取后处理设置（如果配置存在）
+    const postProcessing = APP_CONFIG?.latexPostProcessing || {
+        enabled: true,
+        remove_center_env: true,
+        remove_includegraphics: true
+    };
+    
+    if (!postProcessing.enabled) {
+        return content;
+    }
+    
+    let processed = content;
+    
+    // 移除 \begin{center}...\end{center} 环境（包括内容）
+    if (postProcessing.remove_center_env !== false) {
+        processed = processed.replace(/\\begin\{center\}[\s\S]*?\\end\{center\}/g, '');
+    }
+    
+    // 移除 \includegraphics[]{} 命令（支持可选参数）
+    if (postProcessing.remove_includegraphics !== false) {
+        processed = processed.replace(/\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}/g, '');
+    }
+    
+    return processed;
+}
+
+function parseTableEnvironment(content) {
+    if (!content) return [];
+    
+    const parts = [];
+    let lastPos = 0;
+    let i = 0;
+    const contentLen = content.length;
+    
+    while (i < contentLen) {
+        // 匹配 \begin{table}
+        if (content.substring(i).startsWith('\\begin{table}')) {
+            const beginPos = i;
+            const beginEnd = content.indexOf('}', beginPos);
+            if (beginEnd === -1) {
+                i++;
+                continue;
+            }
+            
+            // 查找 \end{table}
+            const endPos = content.indexOf('\\end{table}', beginEnd);
+            if (endPos === -1) {
+                i++;
+                continue;
+            }
+            
+            // 添加前面的文本
+            const before = content.substring(lastPos, beginPos).trim();
+            if (before) {
+                parts.push({type: 'text', content: before});
+            }
+            
+            // 提取table环境的内容
+            const envStart = beginEnd + 1;
+            const envContent = content.substring(envStart, endPos).trim();
+            
+            // 查找tabular环境
+            const tabularMatch = envContent.match(/\\begin\{tabular\}(\[[^\]]*\])?\{([^}]+)\}/);
+            if (tabularMatch) {
+                const colSpec = tabularMatch[2]; // 列定义
+                const tabularStart = tabularMatch.index + tabularMatch[0].length;
+                const tabularEnd = envContent.indexOf('\\end{tabular}', tabularStart);
+                if (tabularEnd !== -1) {
+                    const tabularContent = envContent.substring(tabularStart, tabularEnd).trim();
+                    // 解析表格行
+                    const rows = [];
+                    const lines = tabularContent.split('\\\\');
+                    for (const line of lines) {
+                        const trimmedLine = line.trim();
+                        if (!trimmedLine || trimmedLine === '\\hline') {
+                            continue;
+                        }
+                        // 分割单元格（简单处理，按&分割）
+                        const cells = trimmedLine.split('&').map(cell => cell.trim());
+                        if (cells.length > 0) {
+                            rows.push(cells);
+                        }
+                    }
+                    if (rows.length > 0) {
+                        parts.push({
+                            type: 'table',
+                            colSpec: colSpec,
+                            rows: rows
+                        });
+                    }
+                }
+            }
+            
+            lastPos = endPos + '\\end{table}'.length;
+            i = lastPos;
+            continue;
+        }
+        
+        i++;
+    }
+    
+    // 添加剩余的文本
+    if (lastPos < contentLen) {
+        const remaining = content.substring(lastPos).trim();
+        if (remaining) {
+            parts.push({type: 'text', content: remaining});
+        }
+    }
+    
+    return parts.length > 0 ? parts : [{type: 'text', content: content}];
+}
+
+function renderTable(colSpec, rows) {
+    if (!rows || rows.length === 0) return '';
+    
+    // 计算列数
+    const colCount = (colSpec.match(/[clr]/g) || []).length || (rows[0] ? rows[0].length : 1);
+    
+    let html = '<table class="latex-table" style="border-collapse: collapse; margin: 10px 0;">';
+    for (const row of rows) {
+        html += '<tr>';
+        for (let i = 0; i < colCount; i++) {
+            const cellContent = row[i] || '';
+            html += `<td style="border: 1px solid #000; padding: 8px;">${renderMathContent(cellContent)}</td>`;
+        }
+        html += '</tr>';
+    }
+    html += '</table>';
+    return html;
+}
+
 function renderMathContent(content) {
     if (!content) return '';
 
-    let processed = content;
-
-    // 移除 \begin{center}...\end{center} 环境（包括内容）
-    processed = processed.replace(/\\begin\{center\}[\s\S]*?\\end\{center\}/g, '');
+    // 使用集中的后处理函数
+    let processed = postProcessLatexContent(content);
     
-    // 移除 \includegraphics[]{} 命令（支持可选参数）
-    processed = processed.replace(/\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}/g, '');
+    // 解析table环境
+    const tableParts = parseTableEnvironment(processed);
+    
+    // 处理每个部分
+    let result = '';
+    for (const part of tableParts) {
+        if (part.type === 'table') {
+            result += renderTable(part.colSpec, part.rows);
+        } else {
+            // 处理其他内容（enumerate等）
+            let textContent = part.content;
+            
+            const placeholders = {
+                olStart: '___MATHJAX_OL_START___',
+                olEnd: '___MATHJAX_OL_END___',
+                ulStart: '___MATHJAX_UL_START___',
+                ulEnd: '___MATHJAX_UL_END___',
+                liItem: '___MATHJAX_LI_ITEM___'
+            };
 
-    const placeholders = {
-        olStart: '___MATHJAX_OL_START___',
-        olEnd: '___MATHJAX_OL_END___',
-        ulStart: '___MATHJAX_UL_START___',
-        ulEnd: '___MATHJAX_UL_END___',
-        liItem: '___MATHJAX_LI_ITEM___'
-    };
+            textContent = textContent.replace(/\\begin\{enumerate\}/g, placeholders.olStart);
+            textContent = textContent.replace(/\\end\{enumerate\}/g, placeholders.olEnd);
+            textContent = textContent.replace(/\\begin\{itemize\}/g, placeholders.ulStart);
+            textContent = textContent.replace(/\\end\{itemize\}/g, placeholders.ulEnd);
+            textContent = textContent.replace(/\\item\s*/g, placeholders.liItem);
 
-    processed = processed.replace(/\\begin\{enumerate\}/g, placeholders.olStart);
-    processed = processed.replace(/\\end\{enumerate\}/g, placeholders.olEnd);
-    processed = processed.replace(/\\begin\{itemize\}/g, placeholders.ulStart);
-    processed = processed.replace(/\\end\{itemize\}/g, placeholders.ulEnd);
-    processed = processed.replace(/\\item\s*/g, placeholders.liItem);
+            let escaped = textContent
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#x27;');
 
-    let escaped = processed
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#x27;');
+            escaped = escaped.replace(new RegExp(placeholders.olStart, 'g'), '<ol class="math-enumerate">');
+            escaped = escaped.replace(new RegExp(placeholders.olEnd, 'g'), '</ol>');
+            escaped = escaped.replace(new RegExp(placeholders.ulStart, 'g'), '<ul class="math-itemize">');
+            escaped = escaped.replace(new RegExp(placeholders.ulEnd, 'g'), '</ul>');
+            escaped = escaped.replace(new RegExp(placeholders.liItem, 'g'), '<li class="math-item">');
 
-    escaped = escaped.replace(new RegExp(placeholders.olStart, 'g'), '<ol class="math-enumerate">');
-    escaped = escaped.replace(new RegExp(placeholders.olEnd, 'g'), '</ol>');
-    escaped = escaped.replace(new RegExp(placeholders.ulStart, 'g'), '<ul class="math-itemize">');
-    escaped = escaped.replace(new RegExp(placeholders.ulEnd, 'g'), '</ul>');
-    escaped = escaped.replace(new RegExp(placeholders.liItem, 'g'), '<li class="math-item">');
+            escaped = escaped.replace(/\n/g, '<br>');
+            
+            result += escaped;
+        }
+    }
 
-    escaped = escaped.replace(/\n/g, '<br>');
-
-    return escaped;
+    return result;
 }
 
 function renderMath() {

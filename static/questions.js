@@ -501,9 +501,17 @@ function updatePagination(totalRecords = questionsTotal) {
     const topNextBtn = typeof topNextPageBtn !== 'undefined' ? topNextPageBtn : document.getElementById('top-next-page');
     const pageInfoEl = typeof pageInfo !== 'undefined' ? pageInfo : document.getElementById('page-info');
     const totalCountEl = typeof totalCount !== 'undefined' ? totalCount : document.getElementById('total-count');
+    const currentPageDisplay = document.getElementById('current-page-display');
+    const totalPagesDisplay = document.getElementById('total-pages-display');
 
     if (pageInfoEl) {
         pageInfoEl.textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页`;
+    }
+    if (currentPageDisplay) {
+        currentPageDisplay.textContent = String(currentPage);
+    }
+    if (totalPagesDisplay) {
+        totalPagesDisplay.textContent = String(totalPages);
     }
     if (prevBtn) {
         prevBtn.disabled = currentPage <= 1;
@@ -574,8 +582,13 @@ function renderModalContent(question) {
     let contentHtml = renderMathContent(latexContent);
 
     const questionTypeLabel = question.question_type || '解答题';
+    const questionSource = question.source || '';
     if (modalQuestionType) {
-        modalQuestionType.textContent = `题型：${questionTypeLabel}`;
+        let typeText = `题型：${questionTypeLabel}`;
+        if (questionSource) {
+            typeText += ` | 来源：${questionSource}`;
+        }
+        modalQuestionType.textContent = typeText;
     }
 
     if (question.image && question.image.length > 0) {

@@ -19,6 +19,7 @@ from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
 import re
 from config import LATEX_COMPILE_CONFIG, LATEX_TEMPLATE_PATH, LATEX_CLASS_PATH, LATEX_OUTPUT_DIR
+from utils import post_process_latex_content
 
 TYPE_SEQUENCE = ["选择题", "填空题", "解答题"]
 DEFAULT_QUESTION_TYPE = "解答题"
@@ -376,8 +377,8 @@ class ExportRenderer:
             对应题目的 LaTeX 文本。
         """
         latex_body = question.get('latex_content', '') or ''
-        # 移除题目描述中的 \includegraphics[]{} 命令
-        latex_body = re.sub(r'\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}', '', latex_body)
+        # 使用集中的后处理函数
+        latex_body = post_process_latex_content(latex_body)
         latex_body = self._convert_enumerate_to_choices(latex_body)
 
         question_body = latex_body.strip()
@@ -1049,6 +1050,138 @@ class ExportRenderer:
         
         return parts if parts else [{'type': 'text', 'content': latex_content}]
     
+    def _parse_table_environment(self, latex_content: str) -> List[Dict]:
+        """
+        解析LaTeX中的table环境，将其转换为结构化数据
+        
+        参数:
+            latex_content: LaTeX 内容字符串。
+            
+        返回:
+            包含 {'type': 'text'/'table', 'content': ...} 的列表。
+        """
+        if not latex_content:
+            return []
+        
+        parts = []
+        content_len = len(latex_content)
+        i = 0
+        last_pos = 0
+        
+        while i < content_len:
+            # 匹配 \begin{table}
+            if latex_content[i:].startswith('\\begin{table}'):
+                # 找到对应的 \end{table}
+                begin_pos = i
+                begin_end = latex_content.find('}', begin_pos)
+                if begin_end == -1:
+                    i += 1
+                    continue
+                
+                # 查找 \end{table}
+                end_pos = latex_content.find('\\end{table}', begin_end)
+                if end_pos == -1:
+                    i += 1
+                    continue
+                
+                # 添加前面的文本
+                before = latex_content[last_pos:begin_pos].strip()
+                if before:
+                    parts.append({'type': 'text', 'content': before})
+                
+                # 提取table环境的内容
+                env_start = begin_end + 1
+                env_content = latex_content[env_start:end_pos].strip()
+                
+                # 查找tabular环境
+                tabular_match = re.search(r'\\begin\{tabular\}(\[[^\]]*\])?\{([^}]+)\}', env_content)
+                if tabular_match:
+                    col_spec = tabular_match.group(2)  # 列定义，如 "|c|c|c|"
+                    tabular_start = tabular_match.end()
+                    tabular_end = env_content.find('\\end{tabular}', tabular_start)
+                    if tabular_end != -1:
+                        tabular_content = env_content[tabular_start:tabular_end].strip()
+                        # 解析表格行
+                        rows = []
+                        for line in tabular_content.split('\\\\'):
+                            line = line.strip()
+                            if not line or line == '\\hline':
+                                continue
+                            # 分割单元格（按&分割，但要注意公式中的&）
+                            cells = []
+                            cell_parts = []
+                            in_math = False
+                            brace_depth = 0
+                            for char in line:
+                                if char == '$' and (not cell_parts or cell_parts[-1] != '\\'):
+                                    in_math = not in_math
+                                    cell_parts.append(char)
+                                elif char == '{':
+                                    brace_depth += 1
+                                    cell_parts.append(char)
+                                elif char == '}':
+                                    brace_depth -= 1
+                                    cell_parts.append(char)
+                                elif char == '&' and not in_math and brace_depth == 0:
+                                    cells.append(''.join(cell_parts).strip())
+                                    cell_parts = []
+                                else:
+                                    cell_parts.append(char)
+                            if cell_parts:
+                                cells.append(''.join(cell_parts).strip())
+                            if cells:
+                                rows.append(cells)
+                        
+                        parts.append({
+                            'type': 'table',
+                            'col_spec': col_spec,
+                            'rows': rows
+                        })
+                
+                last_pos = end_pos + len('\\end{table}')
+                i = last_pos
+                continue
+            
+            i += 1
+        
+        # 添加剩余的文本
+        if last_pos < content_len:
+            remaining = latex_content[last_pos:].strip()
+            if remaining:
+                parts.append({'type': 'text', 'content': remaining})
+        
+        return parts if parts else [{'type': 'text', 'content': latex_content}]
+    
+    def _replace_underline_hspace(self, text: str) -> str:
+        """
+        替换 \underline{\hspace{1cm}} 为下划线文本
+        
+        参数:
+            text: 原始文本。
+            
+        返回:
+            替换后的文本。
+        """
+        # 匹配 \underline{\hspace{长度}} 并替换为下划线
+        # 计算下划线长度（1cm约等于4个字符宽度）
+        def replace_func(match):
+            hspace_match = re.search(r'\\hspace\{([^}]+)\}', match.group(0))
+            if hspace_match:
+                length_str = hspace_match.group(1)
+                # 尝试解析长度，默认1cm=4个字符
+                if 'cm' in length_str:
+                    try:
+                        cm_value = float(length_str.replace('cm', '').strip())
+                        underline_length = max(1, int(cm_value * 4))
+                    except:
+                        underline_length = 4
+                else:
+                    underline_length = 4
+                return '_' * underline_length
+            return '____'  # 默认4个下划线
+        
+        return re.sub(r'\\underline\{[^}]*\\hspace\{[^}]+\}[^}]*\}', replace_func, text)
+    
     def _append_latex_content(self, container, latex_content: str, bullet_style: str = 'List Bullet') -> None:
         """
         向 docx 容器追加包含LaTeX公式的内容
@@ -1064,26 +1197,35 @@ class ExportRenderer:
         if not latex_content:
             return
         
-        # 首先处理enumerate环境
-        enumerate_parts = self._parse_enumerate_environment(latex_content)
+        # 替换 \underline{\hspace{1cm}} 为下划线
+        latex_content = self._replace_underline_hspace(latex_content)
         
-        # 将处理后的内容重新组合，然后解析公式
+        # 首先解析table环境
+        table_parts = self._parse_table_environment(latex_content)
+        
+        # 处理每个部分
         processed_parts = []
-        for part in enumerate_parts:
-            if part['type'] in ('enumerate_start', 'enumerate_end'):
+        for part in table_parts:
+            if part['type'] == 'table':
                 processed_parts.append(part)
-            elif part['type'] == 'enumerate_item':
-                # 对enumerate项的内容进行公式解析
-                item_parts = self._parse_latex_content(part['content'])
-                processed_parts.append({
-                    'type': 'enumerate_item',
-                    'content_parts': item_parts,
-                    'index': part.get('index', 1)
-                })
             else:
-                # 普通文本内容，解析公式
-                text_parts = self._parse_latex_content(part['content'])
-                processed_parts.extend(text_parts)
+                # 处理enumerate环境
+                enumerate_parts = self._parse_enumerate_environment(part['content'])
+                for enum_part in enumerate_parts:
+                    if enum_part['type'] in ('enumerate_start', 'enumerate_end'):
+                        processed_parts.append(enum_part)
+                    elif enum_part['type'] == 'enumerate_item':
+                        # 对enumerate项的内容进行公式解析
+                        item_parts = self._parse_latex_content(enum_part['content'])
+                        processed_parts.append({
+                            'type': 'enumerate_item',
+                            'content_parts': item_parts,
+                            'index': enum_part.get('index', 1)
+                        })
+                    else:
+                        # 普通文本内容，解析公式
+                        text_parts = self._parse_latex_content(enum_part['content'])
+                        processed_parts.extend(text_parts)
         
         # 现在处理组合后的parts
         parts = processed_parts
@@ -1100,7 +1242,13 @@ class ExportRenderer:
         last_was_display = False  # 上一个part是否是行间公式
         
         for part in parts:
-            if part['type'] == 'enumerate_start':
+            if part['type'] == 'table':
+                # 处理表格
+                self._add_table_to_container(container, part['col_spec'], part['rows'])
+                current_paragraph = None
+                last_was_display = False
+                continue
+            elif part['type'] == 'enumerate_start':
                 current_paragraph = None  # 重置当前段落
                 last_was_display = False
                 continue
@@ -1268,6 +1416,41 @@ class ExportRenderer:
             run = paragraph.add_run(text or ' ')
             paragraph.paragraph_format.space_after = Pt(6)
 
+    def _add_table_to_container(self, container, col_spec: str, rows: List[List[str]]) -> None:
+        """
+        向docx容器添加表格
+        
+        参数:
+            container: docx文档或单元格对象。
+            col_spec: 列定义字符串，如 "|c|c|c|"。
+            rows: 表格行数据，每行是一个单元格列表。
+        """
+        if not rows:
+            return
+        
+        # 计算列数（从col_spec中提取，如 "|c|c|c|" 表示3列）
+        col_count = col_spec.count('c') + col_spec.count('l') + col_spec.count('r')
+        if col_count == 0:
+            # 如果没有找到列定义，使用第一行的列数
+            col_count = len(rows[0]) if rows else 1
+        
+        # 创建表格
+        table = container.add_table(rows=len(rows), cols=col_count)
+        table.style = 'Table Grid'
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        
+        # 填充表格数据
+        for row_idx, row_data in enumerate(rows):
+            for col_idx, cell_content in enumerate(row_data):
+                if col_idx < col_count:
+                    cell = table.cell(row_idx, col_idx)
+                    cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+                    # 处理单元格内容（可能包含公式）
+                    self._append_latex_content(cell, cell_content)
+        
+        # 添加空行
+        container.add_paragraph()
+    
     def _add_images_to_cell(self, cell, image_paths: List[str]) -> None:
         """按顺序将图片插入到表格单元格内。
 
