@@ -1154,7 +1154,7 @@ class ExportRenderer:
     
     def _replace_underline_hspace(self, text: str) -> str:
         """
-        替换 \underline{\hspace{1cm}} 为下划线文本
+        替换 underline 为下划线文本
         
         参数:
             text: 原始文本。
