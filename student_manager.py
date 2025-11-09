@@ -8,7 +8,7 @@ import re
 import uuid
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 from openai import OpenAI
@@ -46,7 +46,7 @@ def _utc_now() -> datetime:
     返回:
         当前 UTC 时间的 datetime 对象。
     """
-    return datetime.now(datetime.timezone.utc)
+    return datetime.now(timezone.utc)
 
 
 def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:

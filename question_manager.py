@@ -274,6 +274,9 @@ class QuestionManager:
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
                 
+                # 第一步：收集所有需要计算embedding的题目文本
+                question_data_list = []  # [(question_id, question_text), ...]
+                
                 for question_id in question_ids:
                     # 再次检查是否已有embedding（防止并发情况）
                     if question_id in self.embedding_cache:
@@ -293,20 +296,34 @@ class QuestionManager:
                     
                     question = self._row_to_dict(row)
                     question_text = self._get_question_text(question)
-                    
-                    # 计算embedding（不需要prompt）
-                    try:
-                        embeddings = self.ocr_client.get_embeddings([question_text])
-                        if embeddings and len(embeddings) > 0:
-                            # 再次检查是否已有embedding（防止在计算过程中被其他线程写入）
-                            if question_id not in self.embedding_cache:
-                                self._save_embedding_to_cache(question_id, embeddings[0])
-                            processed_ids.add(question_id)
-                    except Exception as e:
-                        self.logger.log_error(e, f"计算embedding失败 - question_id: {question_id}")
-                        processed_ids.add(question_id)  # 即使失败也标记为已处理，避免重复尝试
+                    question_data_list.append((question_id, question_text))
                 
                 conn.close()
+                
+                # 第二步：批量计算所有题目的embedding
+                if question_data_list:
+                    try:
+                        # 提取所有文本
+                        question_texts = [text for _, text in question_data_list]
+                        # 批量请求embeddings
+                        embeddings_list = self.ocr_client.get_embeddings(question_texts)
+                        
+                        # 第三步：保存所有embedding结果
+                        if embeddings_list and len(embeddings_list) == len(question_data_list):
+                            for idx, (question_id, _) in enumerate(question_data_list):
+                                # 再次检查是否已有embedding（防止在计算过程中被其他线程写入）
+                                if question_id not in self.embedding_cache:
+                                    self._save_embedding_to_cache(question_id, embeddings_list[idx])
+                                processed_ids.add(question_id)
+                        else:
+                            # 如果返回的embedding数量不匹配，记录错误但标记为已处理
+                            self.logger.log_error(
+                                ValueError(f"Embedding数量不匹配: 期望{len(question_data_list)}, 实际{len(embeddings_list) if embeddings_list else 0}"),
+                                "批量计算embedding"
+                            )
+                    except Exception as e:
+                        self.logger.log_error(e, "批量计算embedding失败")
+                
             except Exception as e:
                 self.logger.log_error(e, "异步计算embedding任务失败")
             finally:

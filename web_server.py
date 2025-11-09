@@ -10,7 +10,7 @@ import json
 import os
 import uuid
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 from werkzeug.utils import secure_filename
 from question_manager import QuestionManager
@@ -668,7 +668,7 @@ def get_student_report(student_id):
                 'report': report,
                 'cached': False,
                 'history_preview': [serialize_history_item(item) for item in history_for_report],
-                'generated_at': datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
+                'generated_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
             })
 
         cached = student_manager.get_cached_report(student_id) or {}
