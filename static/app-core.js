@@ -1006,6 +1006,40 @@ function initCustomSelects() {
         }
     }
 
+    if (batchExportSelect) {
+        const trigger = batchExportSelect.querySelector('.custom-select-trigger');
+        if (trigger) {
+            trigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isActive = trigger.classList.contains('active');
+                closeAllCustomSelects();
+                if (!isActive && !trigger.classList.contains('disabled')) {
+                    trigger.classList.add('active');
+                    if (batchExportOptions) {
+                        batchExportOptions.classList.add('show');
+                    }
+                }
+            });
+        }
+    }
+
+    if (classReportExportSelect) {
+        const trigger = classReportExportSelect.querySelector('.custom-select-trigger');
+        if (trigger) {
+            trigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isActive = trigger.classList.contains('active');
+                closeAllCustomSelects();
+                if (!isActive && !trigger.classList.contains('disabled')) {
+                    trigger.classList.add('active');
+                    if (classReportExportOptions) {
+                        classReportExportOptions.classList.add('show');
+                    }
+                }
+            });
+        }
+    }
+
     document.addEventListener('click', (e) => {
         if (!e.target.closest('.custom-select')) {
             closeAllCustomSelects();
