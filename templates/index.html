@@ -250,6 +250,12 @@
                         <button id="reload-students-btn" class="btn btn-secondary">
                             <i class="fas fa-refresh"></i> 刷新
                         </button>
+                        <button id="batch-upload-btn" class="btn btn-secondary">
+                            <i class="fas fa-layer-group"></i> 批量上传
+                        </button>
+                        <button id="class-report-btn" class="btn btn-secondary">
+                            <i class="fas fa-file-lines"></i> 全班报告
+                        </button>
                         <button id="add-student-btn" class="btn btn-primary">
                             <i class="fas fa-user-plus"></i> 添加学生
                         </button>
@@ -427,23 +433,24 @@
     </div>
 
     <!-- 提交作业模态框 -->
-    <div id="homework-modal" class="modal">
-        <div class="modal-content homework-modal-content">
-            <div class="modal-header">
-                <h3 class="heading-with-help">
-                    <span><i class="fas fa-file-signature"></i> 提交作业</span>
-                    <button type="button" class="help-trigger" data-help-key="homeworkModal" aria-label="提交作业帮助">
-                        <i class="fas fa-circle-question"></i>
-                    </button>
-                </h3>
-                <button class="modal-close" data-close="homework-modal">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="homework-meta">
-                    <p>学生：<span id="homework-student-name">-</span></p>
-                    <p>学号：<span id="homework-student-id">-</span></p>
-                </div>
-                <div class="form-group">
+      <div id="homework-modal" class="modal">
+          <div class="modal-content homework-modal-content">
+              <div class="modal-header">
+                  <h3 class="heading-with-help">
+                      <span><i class="fas fa-file-signature"></i> 提交作业</span>
+                      <button type="button" class="help-trigger" data-help-key="homeworkModal" aria-label="提交作业帮助">
+                          <i class="fas fa-circle-question"></i>
+                      </button>
+                  </h3>
+                  <button class="modal-close" data-close="homework-modal">&times;</button>
+              </div>
+              <div class="modal-body">
+                  <div class="homework-meta">
+                      <p>学生：<span id="homework-student-name">-</span></p>
+                      <p>学号：<span id="homework-student-id">-</span></p>
+                      <p id="homework-detected-student" class="detected-student-hint hidden"></p>
+                  </div>
+                  <div class="form-group">
                     <label for="homework-export-select">
                         <i class="fas fa-file-circle-check"></i> 关联试卷
                     </label>
@@ -502,6 +509,115 @@
             </div>
         </div>
     </div>
+
+      <!-- 批量提交作业模态框 -->
+      <div id="batch-homework-modal" class="modal">
+          <div class="modal-content batch-homework-modal-content">
+              <div class="modal-header">
+                  <h3 class="heading-with-help">
+                      <span><i class="fas fa-layer-group"></i> 批量作业解析</span>
+                      <button type="button" class="help-trigger" data-help-key="batchHomeworkModal" aria-label="批量作业解析帮助">
+                          <i class="fas fa-circle-question"></i>
+                      </button>
+                  </h3>
+                  <button class="modal-close" data-close="batch-homework-modal">&times;</button>
+              </div>
+              <div class="modal-body">
+                  <div class="form-group">
+                      <label for="batch-export-select">
+                          <i class="fas fa-file-circle-check"></i> 关联试卷
+                      </label>
+                      <div class="custom-select-wrapper">
+                          <div class="custom-select" id="batch-export-select">
+                              <div class="custom-select-trigger">
+                                  <span class="custom-select-value">请选择试卷</span>
+                                  <i class="fas fa-chevron-down"></i>
+                              </div>
+                              <div class="custom-select-options" id="batch-export-options"></div>
+                          </div>
+                      </div>
+                      <div class="help-text">下拉列表显示最近导出的试卷。</div>
+                  </div>
+                  <div class="form-group">
+                      <label for="batch-file-input">
+                          <i class="fas fa-images"></i> 作业文件
+                      </label>
+                      <div class="batch-upload-area" id="batch-upload-area">
+                          <div class="batch-upload-zone" id="batch-upload-zone">
+                              <div class="upload-icon">
+                                  <i class="fas fa-cloud-arrow-up"></i>
+                              </div>
+                              <h4>点击或拖拽上传作业文件</h4>
+                              <p>支持 PNG、JPG、JPEG、PDF 文件，最大 16MB</p>
+                              <input type="file" id="batch-file-input" accept=".png,.jpg,.jpeg,.pdf" multiple style="display: none;">
+                              <button type="button" id="batch-upload-trigger" class="btn btn-primary">
+                                  <i class="fas fa-upload"></i> 选择文件
+                              </button>
+                          </div>
+                          <div id="batch-upload-summary" class="batch-upload-summary hidden"></div>
+                      </div>
+                  </div>
+                  <div class="batch-actions">
+                      <button id="batch-parse-btn" class="btn btn-primary">
+                          <i class="fas fa-robot"></i> 批量解析
+                      </button>
+                  </div>
+                  <div id="batch-results-container" class="batch-results hidden">
+                      <div class="batch-results-header">
+                          <h4><i class="fas fa-list-check"></i> 解析结果</h4>
+                          <button id="batch-save-btn" class="btn btn-primary" disabled>
+                              <i class="fas fa-save"></i> 批量保存
+                          </button>
+                      </div>
+                      <div id="batch-results-table-wrapper" class="batch-results-table-wrapper"></div>
+                  </div>
+              </div>
+          </div>
+      </div>
+
+      <!-- 全班报告模态框 -->
+      <div id="class-report-modal" class="modal">
+          <div class="modal-content class-report-modal-content">
+              <div class="modal-header">
+                  <h3 class="heading-with-help">
+                      <span><i class="fas fa-file-lines"></i> 全班报告</span>
+                      <button type="button" class="help-trigger" data-help-key="classReportModal" aria-label="全班报告帮助">
+                          <i class="fas fa-circle-question"></i>
+                      </button>
+                  </h3>
+                  <button class="modal-close" data-close="class-report-modal">&times;</button>
+              </div>
+              <div class="modal-body">
+                  <div class="form-group">
+                      <label for="class-report-export-select">
+                          <i class="fas fa-file-circle-check"></i> 选择试卷
+                      </label>
+                      <div class="custom-select-wrapper">
+                          <div class="custom-select" id="class-report-export-select">
+                              <div class="custom-select-trigger">
+                                  <span class="custom-select-value">请选择试卷</span>
+                                  <i class="fas fa-chevron-down"></i>
+                              </div>
+                              <div class="custom-select-options" id="class-report-export-options"></div>
+                          </div>
+                      </div>
+                  </div>
+                  <div class="class-report-actions">
+                      <button id="class-report-generate-btn" class="btn btn-primary">
+                          <i class="fas fa-chart-pie"></i> 生成报告
+                      </button>
+                  </div>
+                  <div id="class-report-content" class="class-report-content hidden">
+                      <div id="class-report-sections" class="class-report-sections"></div>
+                      <div class="class-report-footer">
+                          <button id="class-report-download-btn" class="btn btn-secondary" disabled>
+                              <i class="fas fa-download"></i> 下载报告
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      </div>
 
     <!-- 做题历史模态框 -->
     <div id="history-modal" class="modal">

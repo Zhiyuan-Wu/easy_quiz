@@ -2532,6 +2532,362 @@ mjx-container[display="true"] {
     box-shadow: var(--shadow-soft);
 }
 
+/* 批量作业解析 */
+.batch-homework-modal-content {
+    width: min(960px, 92vw);
+    max-height: 92vh;
+    overflow-y: auto;
+}
+
+.batch-upload-area {
+    border: 1px dashed var(--color-border);
+    border-radius: 12px;
+    background: var(--color-surface-alt);
+    padding: 24px;
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.batch-upload-area:hover {
+    border-color: var(--color-primary);
+    background: rgba(20, 118, 255, 0.08);
+}
+
+.batch-upload-zone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    text-align: center;
+    color: var(--color-muted);
+    cursor: pointer;
+    padding: 20px;
+}
+
+.batch-upload-zone .upload-icon {
+    font-size: 2.6rem;
+    color: var(--color-primary);
+}
+
+.batch-upload-summary {
+    margin-top: 18px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px;
+}
+
+.batch-upload-summary-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.batch-upload-file-list {
+    margin-top: 12px;
+    list-style: none;
+    max-height: 140px;
+    overflow-y: auto;
+    font-size: 0.9rem;
+    color: var(--color-muted);
+}
+
+.batch-upload-file-list li {
+    padding: 4px 0;
+    border-bottom: 1px dashed var(--color-border);
+}
+
+.batch-upload-file-list li:last-child {
+    border-bottom: none;
+}
+
+.batch-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+.batch-results {
+    margin-top: 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.batch-results-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.batch-results-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--color-surface);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: var(--shadow-soft);
+}
+
+.batch-results-table thead th {
+    background: var(--color-surface-muted);
+    font-weight: 600;
+    color: var(--color-muted);
+    text-align: left;
+    padding: 12px 16px;
+}
+
+.batch-results-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: middle;
+}
+
+.batch-results-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.batch-result-row.row-unknown {
+    background: rgba(255, 193, 7, 0.1);
+}
+
+.batch-result-row.row-roster {
+    background: var(--color-surface-alt);
+    color: var(--color-muted);
+}
+
+.student-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.assignment-source {
+    margin-top: 6px;
+    font-size: 0.75rem;
+    color: var(--color-muted);
+}
+
+.detected-hint {
+    font-size: 0.75rem;
+    color: var(--color-primary);
+}
+
+.batch-student-select {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    font-size: 0.9rem;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.batch-student-select:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px rgba(20, 118, 255, 0.15);
+}
+
+.score-chip-neutral {
+    background: var(--color-border);
+    color: var(--color-muted);
+}
+
+.batch-failures {
+    padding: 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(239, 140, 52, 0.22);
+    background: rgba(239, 140, 52, 0.1);
+    color: #8f4b00;
+}
+
+.batch-failures h5 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 0.95rem;
+}
+
+.batch-failures ul {
+    list-style: disc;
+    margin-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.85rem;
+}
+
+.detected-student-hint {
+    margin-top: 6px;
+    font-size: 0.85rem;
+    color: var(--color-primary);
+}
+
+.detected-student-hint.hidden {
+    display: none;
+}
+
+.detected-student-hint.warning {
+    color: var(--color-warning);
+}
+
+.class-report-modal-content {
+    width: min(960px, 95vw);
+    max-height: 92vh;
+    overflow-y: auto;
+}
+
+.class-report-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 16px;
+}
+
+.class-report-content {
+    margin-top: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.class-report-footer {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.class-report-section {
+    background: var(--color-surface);
+    border-radius: 14px;
+    padding: 20px;
+    box-shadow: var(--shadow-soft);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.class-report-section h4 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1.05rem;
+}
+
+.class-report-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.class-report-table th,
+.class-report-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--color-border);
+    text-align: left;
+    vertical-align: middle;
+}
+
+.class-report-table thead th {
+    background: var(--color-surface-muted);
+    font-weight: 600;
+    color: var(--color-muted);
+}
+
+.report-row-average {
+    background: rgba(20, 118, 255, 0.08);
+    font-weight: 600;
+}
+
+.report-row-roster {
+    color: var(--color-muted);
+    background: var(--color-surface-alt);
+}
+
+.rank-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(20, 118, 255, 0.15);
+    color: var(--color-primary);
+    font-size: 0.8rem;
+}
+
+.tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(20, 118, 255, 0.12);
+    color: var(--color-primary);
+    font-size: 0.75rem;
+}
+
+.tag-ghost {
+    background: var(--color-border);
+    color: var(--color-muted);
+}
+
+.mistake-card-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.mistake-card {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: var(--color-surface);
+}
+
+.mistake-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.mistake-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    color: var(--color-muted);
+    font-size: 0.85rem;
+}
+
+.empty-state {
+    padding: 18px;
+    text-align: center;
+    color: var(--color-muted);
+    background: var(--color-surface-alt);
+    border-radius: 10px;
+    font-size: 0.9rem;
+}
+
+.table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    border-radius: inherit;
+}
+
+.table-responsive table {
+    width: 100%;
+    min-width: 600px;
+}
+
 /* 滚动条样式 */
 ::-webkit-scrollbar {
     width: 8px;

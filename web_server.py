@@ -8,10 +8,14 @@ from functools import wraps
 import base64
 import json
 import os
+import re
 import uuid
 import time
 from datetime import datetime, timezone
 from io import BytesIO
+from typing import Any, Dict, List, Optional, Sequence
+
+import requests
 from werkzeug.utils import secure_filename
 from question_manager import QuestionManager
 from ocr_client import DeepSeekOCRClient
@@ -28,6 +32,7 @@ from config import (
     ANALYTICS_WINDOW_DAYS,
     REPORT_MAX_ITEMS,
     EXAM_PARSE_ANSWER_BATCH_SIZE,
+    LATEX_COMPILE_CONFIG,
 )
 from logger import get_logger
 from pdf2image import convert_from_bytes
@@ -36,6 +41,12 @@ from utils import (
     apply_filename_replacements,
     convert_pdf_to_images,
     save_ocr_images,
+)
+from class_report import (
+    build_section_instances,
+    build_sections_payload,
+    render_sections_latex,
+    latex_escape,
 )
 
 app = Flask(__name__)
@@ -151,6 +162,372 @@ def allowed_file(filename):
         若扩展名合法返回 True，否则返回 False。
     """
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def normalize_homework_results(
+    questions: Sequence[Dict[str, Any]],
+    llm_results: Sequence[Dict[str, Any]],
+    fallback_student_id: str,
+) -> List[Dict[str, Any]]:
+    """根据题目顺序整理LLM返回的批改结果。"""
+    results_by_id: Dict[int, Dict[str, Any]] = {}
+    results_by_number: Dict[int, Dict[str, Any]] = {}
+
+    for item in llm_results or []:
+        if not isinstance(item, dict):
+            continue
+        qid_val = item.get("question_id")
+        qnum_val = item.get("question_number")
+        try:
+            if qid_val is not None:
+                results_by_id[int(qid_val)] = item
+        except (TypeError, ValueError):
+            pass
+        try:
+            if qnum_val is not None:
+                results_by_number[int(qnum_val)] = item
+        except (TypeError, ValueError):
+            pass
+
+    normalized: List[Dict[str, Any]] = []
+    for index, question in enumerate(questions, start=1):
+        qid = question.get("id")
+        raw_item: Optional[Dict[str, Any]] = None
+
+        int_qid: Optional[int] = None
+        try:
+            if qid is not None:
+                int_qid = int(qid)
+        except (TypeError, ValueError):
+            int_qid = None
+
+        if int_qid is not None and int_qid in results_by_id:
+            raw_item = results_by_id[int_qid]
+        elif index in results_by_number:
+            raw_item = results_by_number[index]
+
+        student_answer = ""
+        feedback = ""
+        score_value = 0.0
+        student_id = fallback_student_id or ""
+
+        if raw_item:
+            student_answer = raw_item.get("student_answer") or ""
+            feedback = raw_item.get("feedback") or ""
+            custom_student_id = raw_item.get("student_id")
+            if isinstance(custom_student_id, str) and custom_student_id.strip():
+                student_id = custom_student_id.strip()
+            try:
+                score_value = float(raw_item.get("score", 0))
+            except (TypeError, ValueError):
+                score_value = 0.0
+
+        score_value = max(0.0, min(1.0, score_value))
+
+        normalized.append(
+            {
+                "question_id": qid,
+                "question_number": index,
+                "original_question": question.get("latex_content"),
+                "reference_answer": question.get("reference_answer"),
+                "student_answer": student_answer,
+                "score": round(score_value, 4),
+                "feedback": feedback,
+                "question_type": question.get("question_type"),
+                "tags": question.get("tags", []),
+                "source": question.get("source"),
+                "student_id": student_id,
+            }
+        )
+
+    return normalized
+
+
+def perform_homework_parsing(
+    file_path: str,
+    questions: List[Dict[str, Any]],
+    paper_title: str,
+    user_id: int,
+) -> Dict[str, Any]:
+    """执行OCR与作业批改流程，返回整理后的结果。"""
+    ocr_result = ocr_client.ocr_image(file_path)
+    ocr_text = ocr_result.get("markdown") or ocr_result.get("text") or ""
+
+    parse_payload = student_manager.parse_homework_ocr(paper_title, questions, ocr_text, user_id)
+    if not isinstance(parse_payload, dict):
+        raise ValueError("作业批改失败，返回格式无效")
+
+    detected_student_id = (parse_payload.get("detected_student_id") or "").strip()
+    detected_student_name = (parse_payload.get("detected_student_name") or "").strip()
+    llm_results = parse_payload.get("results") if isinstance(parse_payload.get("results"), list) else []
+
+    normalized_results = normalize_homework_results(questions, llm_results, detected_student_id)
+
+    return {
+        "ocr_text": ocr_text,
+        "ocr_images": ocr_result.get("images", []),
+        "detected_student_id": detected_student_id,
+        "detected_student_name": detected_student_name,
+        "normalized_results": normalized_results,
+        "llm_results": llm_results,
+    }
+
+
+def match_student_by_filename(filename: str, roster: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """尝试根据文件名匹配学生信息。"""
+    if not filename:
+        return None
+    name_body = os.path.splitext(filename)[0].lower()
+    for student in roster:
+        if not isinstance(student, dict):
+            continue
+        sid = str(student.get("student_id") or "").lower()
+        name = str(student.get("name") or "").lower()
+        if sid and sid in name_body:
+            return student
+        if name and name in name_body:
+            return student
+    return None
+
+
+def build_class_report_context(export_id: int, user_id: int) -> Dict[str, Any]:
+    """构建全班报告所需的数据上下文。"""
+    export_data = system_manager.get_export_by_id(export_id)
+    if not export_data or export_data.get("user_id") != user_id:
+        raise ValueError("无法访问指定的试卷")
+
+    question_ids = export_data.get("question_ids") or []
+    questions: List[Dict[str, Any]] = []
+    question_id_map: Dict[Any, Dict[str, Any]] = {}
+    for index, qid in enumerate(question_ids, start=1):
+        question = question_manager.get_question_by_id(qid, user_id)
+        if not question:
+            continue
+        tags = question.get("tags") or []
+        if isinstance(tags, str):
+            tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
+        meta = {
+            "id": question.get("id"),
+            "number": index,
+            "question_type": question.get("question_type"),
+            "tags": tags,
+            "latex_content": question.get("latex_content"),
+            "reference_answer": question.get("reference_answer"),
+        }
+        questions.append(meta)
+        key_candidates = {qid, question.get("id"), str(question.get("id"))}
+        for key in list(key_candidates):
+            try:
+                key_candidates.add(int(key))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue
+        for key in key_candidates:
+            question_id_map[key] = meta
+
+    if not questions:
+        raise ValueError("所选试卷暂无题目信息")
+
+    roster = student_manager.list_students(user_id)
+    roster_map = {
+        str(student.get("student_id")): student
+        for student in roster
+        if isinstance(student, dict) and student.get("student_id")
+    }
+
+    result_rows = student_manager.get_homework_results_by_export(export_id, user_id)
+    question_scores: Dict[int, List[float]] = {item["number"]: [] for item in questions}
+    student_entries: Dict[str, Dict[str, Any]] = {}
+
+    for row in result_rows:
+        sid = row.get("student_id")
+        if not sid:
+            continue
+
+        qnum_raw = row.get("question_number")
+        qnum: Optional[int] = None
+        try:
+            if qnum_raw is not None:
+                qnum = int(qnum_raw)
+        except (TypeError, ValueError):
+            qnum = None
+
+        if qnum not in question_scores:
+            qmeta = question_id_map.get(row.get("question_id"))
+            if qmeta:
+                qnum = qmeta.get("number")
+
+        if qnum not in question_scores:
+            continue
+
+        try:
+            score_value = float(row.get("score", 0.0))
+        except (TypeError, ValueError):
+            score_value = 0.0
+        score_value = max(0.0, min(1.0, score_value))
+
+        entry = student_entries.setdefault(
+            sid,
+            {
+                "student_id": sid,
+                "student_name": row.get("student_name")
+                or row.get("roster_name")
+                or roster_map.get(str(sid), {}).get("name", ""),
+                "scores": {},
+            },
+        )
+        entry["scores"][qnum] = score_value
+        question_scores[qnum].append(score_value)
+
+    total_questions = len(questions)
+    ranking_rows: List[Dict[str, Any]] = []
+    for entry in student_entries.values():
+        normalized_scores = {
+            question["number"]: entry["scores"].get(question["number"], 0.0) for question in questions
+        }
+        total_raw = sum(normalized_scores.values())
+        total_score = total_raw / total_questions if total_questions else 0.0
+        ranking_rows.append(
+            {
+                "student_id": entry["student_id"],
+                "student_name": entry.get("student_name", ""),
+                "scores": normalized_scores,
+                "total_raw": total_raw,
+                "total_score": total_score,
+            }
+        )
+
+    ranking_rows.sort(key=lambda item: (-item["total_score"], str(item["student_id"])))
+    last_score: Optional[float] = None
+    current_rank = 0
+    for index, row in enumerate(ranking_rows, start=1):
+        score_value = row["total_score"]
+        if last_score is None or abs(score_value - last_score) > 1e-6:
+            current_rank = index
+            last_score = score_value
+        row["rank"] = current_rank
+
+    average_scores = {}
+    for question in questions:
+        qnum = question["number"]
+        scores_list = question_scores.get(qnum, [])
+        average_scores[qnum] = sum(scores_list) / len(scores_list) if scores_list else 0.0
+
+    average_total_raw = (
+        sum(row["total_raw"] for row in ranking_rows) / len(ranking_rows) if ranking_rows else 0.0
+    )
+    average_total_score = average_total_raw / total_questions if total_questions else 0.0
+    average_row = {
+        "scores": average_scores,
+        "total_raw": average_total_raw,
+        "total_score": average_total_score,
+    }
+
+    overview_rows: List[Dict[str, Any]] = []
+    for question in questions:
+        qnum = question["number"]
+        scores_list = question_scores.get(qnum, [])
+        attempts = len(scores_list)
+        average_score = sum(scores_list) / attempts if attempts else 0.0
+        full_score_rate = sum(1 for score in scores_list if score >= 0.999) / attempts if attempts else 0.0
+        overview_rows.append(
+            {
+                "question_number": qnum,
+                "question_id": question.get("id"),
+                "question_type": question.get("question_type"),
+                "tags": question.get("tags", []),
+                "average_score": average_score,
+                "full_score_rate": full_score_rate,
+                "attempts": attempts,
+            }
+        )
+
+    mistake_candidates = [
+        item for item in overview_rows if item.get("attempts", 0) > 0
+    ]
+    mistake_candidates.sort(key=lambda item: item.get("full_score_rate", 0.0))
+
+    common_mistakes: List[Dict[str, Any]] = []
+    for item in mistake_candidates[:3]:
+        qnum = item.get("question_number")
+        meta = next((q for q in questions if q.get("number") == qnum), {})
+        common_mistakes.append(
+            {
+                "question_number": item.get("question_number"),
+                "question_id": item.get("question_id"),
+                "question_type": item.get("question_type"),
+                "tags": item.get("tags", []),
+                "average_score": item.get("average_score"),
+                "full_score_rate": item.get("full_score_rate"),
+                "latex_content": meta.get("latex_content", ""),
+            }
+        )
+
+    roster_rows = []
+    for sid, student in roster_map.items():
+        if sid not in student_entries:
+            roster_rows.append(
+                {
+                    "student_id": sid,
+                    "student_name": student.get("name", ""),
+                    "scores": {question["number"]: None for question in questions},
+                    "total_raw": None,
+                    "total_score": None,
+                }
+            )
+
+    return {
+        "paper_title": export_data.get("title") or "未命名试卷",
+        "questions": questions,
+        "ranking_rows": ranking_rows,
+        "average_row": average_row,
+        "overview_rows": overview_rows,
+        "common_mistakes": common_mistakes,
+        "roster_rows": roster_rows,
+        "student_count": len(ranking_rows),
+    }
+
+
+def build_class_report_latex(paper_title: str, sections_latex: str) -> str:
+    """生成完整的LaTeX文档内容。"""
+    title_text = latex_escape(paper_title or "未命名试卷")
+    return (
+        "\\documentclass{exam-zh}\n"
+        "\\usepackage{booktabs}\n"
+        "\\begin{document}\n"
+        "\\begin{center}\n"
+        "\\LARGE 全班作业报告\\\\[6pt]\n"
+        f"\\large {title_text}\n"
+        "\\end{center}\n\n"
+        f"{sections_latex}\n\n"
+        "\\end{document}\n"
+    )
+
+
+def compile_latex_to_pdf(latex_content: str) -> str:
+    """调用外部LaTeX编译服务生成PDF，并返回base64内容。"""
+    api_url = LATEX_COMPILE_CONFIG.get("api_url")
+    if not api_url:
+        raise ValueError("未配置LaTeX编译服务地址")
+
+    payload: Dict[str, Any] = {"latex_content": latex_content}
+    compile_recipe = LATEX_COMPILE_CONFIG.get("compile_recipe")
+    if compile_recipe:
+        payload["compile_recipe"] = compile_recipe
+
+    try:
+        response = requests.post(api_url, json=payload, timeout=120)
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException as exc:
+        raise ValueError(f"PDF编译请求失败: {exc}") from exc
+
+    if not data.get("success"):
+        raise ValueError(data.get("error") or "PDF编译失败")
+
+    pdf_base64 = data.get("pdf_base64")
+    if not pdf_base64:
+        raise ValueError("PDF编译服务未返回文件数据")
+    return pdf_base64
 
 
 def parse_iso_datetime(value):
@@ -467,76 +844,15 @@ def parse_student_homework(student_id):
 
         paper_title = export_data.get('title') or '未命名试卷'
 
-        file_ext = os.path.splitext(filename)[1].lower()
-        if file_ext == '.pdf':
-            pages_dir = os.path.join(HOMEWORK_UPLOAD_DIR, 'pdf_pages')
-            page_image_paths = convert_pdf_to_images(save_path, pages_dir)
-            ocr_segments = []
-            for page_index, image_path in page_image_paths:
-                logger.log_system_info(f"作业OCR - PDF第{page_index}页: {image_path}")
-                page_result = ocr_client.ocr_image(image_path)
-                page_text = page_result.get('markdown') or page_result.get('text') or ''
-                if page_text:
-                    ocr_segments.append(page_text)
-            ocr_text = '\n\n'.join(ocr_segments)
-        else:
-            ocr_result = ocr_client.ocr_image(save_path)
-            ocr_text = ocr_result.get('markdown') or ocr_result.get('text') or ''
-
-        llm_results = student_manager.parse_homework_ocr(paper_title, questions, ocr_text)
-
-        results_by_id = {}
-        results_by_number = {}
-        for item in llm_results:
-            if not isinstance(item, dict):
-                continue
-            qid_val = item.get('question_id')
-            qnum_val = item.get('question_number')
-            try:
-                if qid_val is not None:
-                    results_by_id[int(qid_val)] = item
-            except (TypeError, ValueError):
-                pass
-            try:
-                if qnum_val is not None:
-                    results_by_number[int(qnum_val)] = item
-            except (TypeError, ValueError):
-                pass
-
-        normalized_results = []
-        for index, question in enumerate(questions, start=1):
-            qid = question.get('id')
-            raw_item = None
-            if qid in results_by_id:
-                raw_item = results_by_id[qid]
-            elif index in results_by_number:
-                raw_item = results_by_number[index]
-
-            student_answer = ''
-            score = 0.0
-            feedback = ''
-
-            if raw_item:
-                student_answer = raw_item.get('student_answer') or ''
-                feedback = raw_item.get('feedback') or ''
-                try:
-                    score = float(raw_item.get('score', 0))
-                except (TypeError, ValueError):
-                    score = 0.0
-                score = max(0.0, min(1.0, score))
-
-            normalized_results.append({
-                'question_id': qid,
-                'question_number': index,
-                'original_question': question.get('latex_content'),
-                'reference_answer': question.get('reference_answer'),
-                'student_answer': student_answer,
-                'score': round(score, 4),
-                'feedback': feedback,
-                'question_type': question.get('question_type'),
-                'tags': question.get('tags', []),
-                'source': question.get('source'),
-            })
+        parsing_bundle = perform_homework_parsing(
+            save_path,
+            questions,
+            paper_title,
+            session['user_id'],
+        )
+        normalized_results = parsing_bundle.get('normalized_results', [])
+        detected_student_id = parsing_bundle.get('detected_student_id', '')
+        detected_student_name = parsing_bundle.get('detected_student_name', '')
 
         return jsonify({
             'success': True,
@@ -544,12 +860,318 @@ def parse_student_homework(student_id):
             'student': serialize_student(student_record),
             'export_id': export_id,
             'results': normalized_results,
+            'detected_student_id': detected_student_id,
+            'detected_student_name': detected_student_name,
         })
     except Exception as e:
         log_error_with_details(e, f"作业解析失败 - 学生: {student_id}", 
                               student_id=student_id, export_id=export_id, 
                               student_name=student_name, filename=file.filename if 'file' in locals() else None)
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/students/homework/batch-parse', methods=['POST'])
+@login_required
+def batch_parse_homework():
+    """批量解析作业文件的接口。"""
+    user_id = session['user_id']
+    files = request.files.getlist('files')
+    if not files:
+        files = request.files.getlist('file')
+    if not files:
+        return jsonify({'success': False, 'message': '请上传作业文件'}), 400
+
+    export_id_raw = request.form.get('export_id')
+    if not export_id_raw:
+        return jsonify({'success': False, 'message': '请选择关联的试卷'}), 400
+
+    try:
+        export_id = int(export_id_raw)
+    except ValueError:
+        return jsonify({'success': False, 'message': '试卷信息无效'}), 400
+
+    export_data = system_manager.get_export_by_id(export_id)
+    if not export_data or export_data.get('user_id') != user_id:
+        return jsonify({'success': False, 'message': '无法访问指定的试卷'}), 400
+
+    question_ids = export_data.get('question_ids') or []
+    questions: List[Dict[str, Any]] = []
+    for qid in question_ids:
+        question = question_manager.get_question_by_id(qid, user_id)
+        if question:
+            questions.append(question)
+
+    if not questions:
+        return jsonify({'success': False, 'message': '所选试卷暂无题目信息'}), 400
+
+    paper_title = export_data.get('title') or '未命名试卷'
+    roster = student_manager.list_students(user_id)
+    roster_map = {
+        str(student.get('student_id')): student for student in roster if isinstance(student, dict)
+    }
+
+    mapping: Dict[str, Dict[str, Any]] = {}
+    mapping_order: List[str] = []
+    failures: List[Dict[str, Any]] = []
+    unknown_counter = 1
+
+    for file in files:
+        original_filename = getattr(file, 'filename', '') or ''
+        if not original_filename:
+            continue
+
+        if not allowed_file(original_filename):
+            failures.append({'filename': original_filename, 'message': '文件格式不支持'})
+            continue
+
+        filename = secure_filename(original_filename) or f"upload_{uuid.uuid4().hex}.dat"
+        unique_filename = f"{uuid.uuid4().hex}_{filename}"
+        save_path = os.path.join(HOMEWORK_UPLOAD_DIR, unique_filename)
+
+        try:
+            file.save(save_path)
+        except Exception as exc:
+            log_error_with_details(exc, "批量作业上传保存失败", filename=original_filename)
+            failures.append({'filename': original_filename, 'message': '文件保存失败'})
+            continue
+
+        try:
+            parsing_bundle = perform_homework_parsing(save_path, questions, paper_title, user_id)
+        except Exception as exc:
+            log_error_with_details(exc, "批量作业解析失败", filename=original_filename)
+            failures.append({'filename': original_filename, 'message': str(exc)})
+            continue
+
+        matched_student = match_student_by_filename(original_filename, roster)
+        assignment_source = 'filename' if matched_student else 'llm'
+        assigned_student_id = ''
+        assigned_student_name = ''
+
+        if matched_student:
+            assigned_student_id = str(matched_student.get('student_id', '')).strip()
+            assigned_student_name = matched_student.get('name', '') or ''
+        else:
+            detected_id = parsing_bundle.get('detected_student_id', '').strip()
+            detected_name = parsing_bundle.get('detected_student_name', '').strip()
+            if detected_id:
+                assigned_student_id = detected_id
+                assigned_student_name = detected_name or roster_map.get(detected_id, {}).get('name', '')
+            else:
+                assignment_source = 'unknown'
+                assigned_student_id = f"unknown_id{unknown_counter}"
+                unknown_counter += 1
+                assigned_student_name = ''
+
+        if not assigned_student_id:
+            assigned_student_id = f"unknown_id{unknown_counter}"
+            unknown_counter += 1
+
+        if assigned_student_id in mapping:
+            failures.append({
+                'filename': original_filename,
+                'message': f'学号 {assigned_student_id} 已存在，已跳过该文件'
+            })
+            continue
+
+        normalized_results = []
+        for item in parsing_bundle.get('normalized_results', []):
+            if not isinstance(item, dict):
+                continue
+            result_copy = dict(item)
+            result_copy['student_id'] = assigned_student_id
+            normalized_results.append(result_copy)
+
+        question_count = len(questions)
+        total_raw = sum(result.get('score', 0.0) for result in normalized_results)
+        average_score = total_raw / question_count if question_count else 0.0
+
+        mapping[assigned_student_id] = {
+            'student_id': assigned_student_id,
+            'student_name': assigned_student_name,
+            'detected_student_id': parsing_bundle.get('detected_student_id', ''),
+            'detected_student_name': parsing_bundle.get('detected_student_name', ''),
+            'assignment_source': assignment_source,
+            'original_filename': original_filename,
+            'stored_filename': unique_filename,
+            'results': normalized_results,
+            'total_score': average_score,
+            'total_raw': total_raw,
+        }
+        mapping_order.append(assigned_student_id)
+
+    question_columns = [
+        {
+            'question_number': index,
+            'question_id': question.get('id'),
+            'question_type': question.get('question_type'),
+        }
+        for index, question in enumerate(questions, start=1)
+    ]
+
+    return jsonify({
+        'success': True,
+        'paper_title': paper_title,
+        'export_id': export_id,
+        'questions': question_columns,
+        'mapping': mapping,
+        'order': mapping_order,
+        'failures': failures,
+    })
+
+
+@app.route('/api/students/homework/batch-save', methods=['POST'])
+@login_required
+def batch_save_homework():
+    """批量保存作业批改结果的接口。"""
+    user_id = session['user_id']
+    data = request.get_json() or {}
+    export_id_raw = data.get('export_id')
+    paper_title = data.get('paper_title') or ''
+    entries = data.get('students') or []
+
+    if not export_id_raw:
+        return jsonify({'success': False, 'message': '缺少试卷信息'}), 400
+
+    try:
+        export_id = int(export_id_raw)
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'message': '试卷信息无效'}), 400
+
+    if not entries:
+        return jsonify({'success': False, 'message': '没有可保存的作业结果'}), 400
+
+    saved: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, Any]] = []
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+
+        student_id = (entry.get('student_id') or '').strip()
+        if not student_id or student_id.startswith('unknown_id'):
+            skipped.append({'student_id': student_id or '', 'reason': '未指定有效学生'})
+            continue
+
+        student_name = (entry.get('student_name') or '').strip()
+        results = entry.get('results') or []
+        if not results:
+            skipped.append({'student_id': student_id, 'reason': '缺少作业结果'})
+            continue
+
+        student = student_manager.get_student(student_id, user_id)
+        if not student:
+            if not student_name:
+                skipped.append({'student_id': student_id, 'reason': '缺少学生姓名'})
+                continue
+            student = student_manager.add_student(student_id, student_name, user_id)
+        else:
+            student_name = student.get('name') or student_name
+
+        items: List[HomeworkItem] = []
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            try:
+                score = float(result.get('score', 0))
+            except (TypeError, ValueError):
+                score = 0.0
+            score = max(0.0, min(1.0, score))
+            item = HomeworkItem(
+                question_id=result.get('question_id'),
+                question_number=str(result.get('question_number')),
+                original_question=result.get('original_question') or '',
+                reference_answer=result.get('reference_answer') or '',
+                student_answer=result.get('student_answer') or '',
+                score=score,
+                feedback=result.get('feedback') or '',
+            )
+            items.append(item)
+
+        if not items:
+            skipped.append({'student_id': student_id, 'reason': '作业结果格式无效'})
+            continue
+
+        session_uid = student_manager.record_homework_results(
+            student_id=student_id,
+            student_name=student_name,
+            export_id=export_id,
+            paper_title=paper_title,
+            items=items,
+            user_id=user_id,
+            raw_payload=entry,
+        )
+        saved.append({'student_id': student_id, 'session_uid': session_uid})
+
+    return jsonify({
+        'success': True,
+        'saved': saved,
+        'skipped': skipped,
+    })
+
+
+@app.route('/api/students/class-report', methods=['POST'])
+@login_required
+def generate_class_report():
+    """生成全班作业报告的数据。"""
+    user_id = session['user_id']
+    data = request.get_json() or {}
+    export_id_raw = data.get('export_id')
+    if not export_id_raw:
+        return jsonify({'success': False, 'message': '缺少试卷信息'}), 400
+
+    try:
+        export_id = int(export_id_raw)
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'message': '试卷信息无效'}), 400
+
+    try:
+        context = build_class_report_context(export_id, user_id)
+        sections = build_section_instances(context)
+        sections_payload = build_sections_payload(sections)
+    except Exception as exc:
+        log_error_with_details(exc, "生成全班报告失败", export_id=export_id)
+        return jsonify({'success': False, 'message': str(exc)}), 500
+
+    return jsonify({
+        'success': True,
+        'paper_title': context.get('paper_title'),
+        'section_order': sections_payload.get('order', []),
+        'sections': sections_payload.get('sections', {}),
+        'question_count': len(context.get('questions', [])),
+        'student_count': context.get('student_count', 0),
+    })
+
+
+@app.route('/api/students/class-report/download', methods=['POST'])
+@login_required
+def download_class_report():
+    """生成并下载全班作业报告PDF。"""
+    user_id = session['user_id']
+    data = request.get_json() or {}
+    export_id_raw = data.get('export_id')
+    if not export_id_raw:
+        return jsonify({'success': False, 'message': '缺少试卷信息'}), 400
+
+    try:
+        export_id = int(export_id_raw)
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'message': '试卷信息无效'}), 400
+
+    try:
+        context = build_class_report_context(export_id, user_id)
+        sections = build_section_instances(context)
+        sections_latex = render_sections_latex(sections)
+        latex_content = build_class_report_latex(context.get('paper_title'), sections_latex)
+        pdf_base64 = compile_latex_to_pdf(latex_content)
+    except Exception as exc:
+        log_error_with_details(exc, "导出全班报告PDF失败", export_id=export_id)
+        return jsonify({'success': False, 'message': str(exc)}), 500
+
+    return jsonify({
+        'success': True,
+        'paper_title': context.get('paper_title'),
+        'pdf_base64': pdf_base64,
+    })
 
 
 @app.route('/api/students/<student_id>/homework/save', methods=['POST'])

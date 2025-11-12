@@ -1,6 +1,12 @@
-import requests
+import hashlib
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any, Dict, List
+
+import requests
+
 from config import EMBEDDING_CONFIG
+from utils import convert_pdf_to_images
 
 class DeepSeekOCRClient:
     """DeepSeek OCR 与向量服务的轻量级客户端。"""
@@ -16,11 +22,11 @@ class DeepSeekOCRClient:
         self.base_url = base_url.rstrip('/')
         self.ocr_endpoint = f"{self.base_url}/ocr"
 
-    def ocr_image(self, image_path: str) -> dict:
-        """上传本地图片并获取 OCR 结果（Markdown 格式）。
+    def ocr_image(self, image_path: str) -> Dict[str, Any]:
+        """上传本地图片或 PDF 并获取 OCR 结果（Markdown 格式）。
 
         参数:
-            image_path: 本地图片路径，支持 PNG/JPG。
+            image_path: 本地图片 / PDF 路径，支持 PNG、JPG、PDF（多页）。
 
         返回:
             包含 `request_id`、`markdown` 与 `images` 的字典。
@@ -28,25 +34,81 @@ class DeepSeekOCRClient:
         异常:
             requests.HTTPError, FileNotFoundError, ValueError。
         """
-        image_path = Path(image_path)
-        if not image_path.is_file():
+        path_obj = Path(image_path)
+        if not path_obj.is_file():
             raise FileNotFoundError(f"Image file not found: {image_path}")
 
-        # 确保是图片格式
-        if image_path.suffix.lower() not in {'.png', '.jpg', '.jpeg'}:
-            raise ValueError("Only PNG/JPG images are supported")
+        suffix = path_obj.suffix.lower()
+        if suffix == ".pdf":
+            return self._ocr_pdf(path_obj)
+        if suffix not in {".png", ".jpg", ".jpeg"}:
+            raise ValueError("Only PNG/JPG images or PDF documents are supported")
 
-        with open(image_path, 'rb') as f:
-            files = {'file': (image_path.name, f, 'image/png')}
+        return self._ocr_single_image(path_obj)
+
+    def _ocr_single_image(self, image_path: Path) -> Dict[str, Any]:
+        """对单张图片执行 OCR 请求。"""
+        with open(image_path, "rb") as file_obj:
+            files = {"file": (image_path.name, file_obj, "image/png")}
             response = requests.post(self.ocr_endpoint, files=files)
 
-        # 抛出 HTTP 错误
         response.raise_for_status()
+        return response.json()
 
-        result = response.json()
-        
-        # OCR服务器已经返回base64编码的图片数据，直接返回
-        return result
+    def _ocr_pdf(self, pdf_path: Path) -> Dict[str, Any]:
+        """将 PDF 拆分为页面并合并 OCR 结果。"""
+        pdf_hash = self._hash_file(pdf_path)
+        markdown_segments: List[str] = []
+        all_images: List[Dict[str, Any]] = []
+        page_details: List[Dict[str, Any]] = []
+
+        with TemporaryDirectory(prefix="ocr_pdf_") as temp_dir:
+            page_images = convert_pdf_to_images(str(pdf_path), temp_dir)
+            if not page_images:
+                return {
+                    "request_id": f"{pdf_hash}_pdf",
+                    "markdown": "",
+                    "text": "",
+                    "images": [],
+                    "pages": [],
+                }
+
+            for page_index, image_path in page_images:
+                page_result = self._ocr_single_image(Path(image_path))
+                page_markdown = page_result.get("markdown") or page_result.get("text") or ""
+                page_images_data = page_result.get("images") or []
+
+                if page_markdown.strip():
+                    markdown_segments.append(page_markdown.strip())
+                if page_images_data:
+                    all_images.extend(page_images_data)
+
+                page_details.append(
+                    {
+                        "page": page_index,
+                        "request_id": page_result.get("request_id"),
+                        "markdown": page_markdown,
+                        "images": page_images_data,
+                    }
+                )
+
+        combined_markdown = "\n\n".join(markdown_segments)
+        return {
+            "request_id": f"{pdf_hash}_pdf",
+            "markdown": combined_markdown,
+            "text": combined_markdown,
+            "images": all_images,
+            "pages": page_details,
+        }
+
+    @staticmethod
+    def _hash_file(path: Path) -> str:
+        """计算文件内容的短哈希值。"""
+        hasher = hashlib.sha256()
+        with open(path, "rb") as file_obj:
+            for chunk in iter(lambda: file_obj.read(4096), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()[:32]
     
     def get_embeddings(self, texts: list) -> list:
         """获取文本的 embedding 向量。

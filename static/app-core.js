@@ -18,7 +18,9 @@ let homeworkState = {
     exportId: null,
     paperTitle: '',
     results: [],
-    raw: null
+    raw: null,
+    detectedStudentId: '',
+    detectedStudentName: ''
 };
 let exportHistoryCache = null;
 
@@ -81,6 +83,8 @@ const addStudentForm = document.getElementById('add-student-form');
 const submitStudentBtn = document.getElementById('submit-student-btn');
 const addStudentBtn = document.getElementById('add-student-btn');
 const reloadStudentsBtn = document.getElementById('reload-students-btn');
+const batchUploadBtn = document.getElementById('batch-upload-btn');
+const classReportBtn = document.getElementById('class-report-btn');
 const studentIdInput = document.getElementById('student-id-input');
 const studentNameInput = document.getElementById('student-name-input');
 const studentsTableBody = document.getElementById('students-table-body');
@@ -102,6 +106,25 @@ const homeworkResultsContainer = document.getElementById('homework-results');
 const homeworkResultsList = document.getElementById('homework-results-list');
 const homeworkStudentName = document.getElementById('homework-student-name');
 const homeworkStudentId = document.getElementById('homework-student-id');
+const homeworkDetectedStudent = document.getElementById('homework-detected-student');
+const batchHomeworkModal = document.getElementById('batch-homework-modal');
+const batchExportSelect = document.getElementById('batch-export-select');
+const batchExportOptions = document.getElementById('batch-export-options');
+const batchFileInput = document.getElementById('batch-file-input');
+const batchUploadTrigger = document.getElementById('batch-upload-trigger');
+const batchUploadSummary = document.getElementById('batch-upload-summary');
+const batchUploadZone = document.getElementById('batch-upload-zone');
+const batchParseBtn = document.getElementById('batch-parse-btn');
+const batchResultsContainer = document.getElementById('batch-results-container');
+const batchResultsTableWrapper = document.getElementById('batch-results-table-wrapper');
+const batchSaveBtn = document.getElementById('batch-save-btn');
+const classReportModal = document.getElementById('class-report-modal');
+const classReportExportSelect = document.getElementById('class-report-export-select');
+const classReportExportOptions = document.getElementById('class-report-export-options');
+const classReportGenerateBtn = document.getElementById('class-report-generate-btn');
+const classReportContent = document.getElementById('class-report-content');
+const classReportSections = document.getElementById('class-report-sections');
+const classReportDownloadBtn = document.getElementById('class-report-download-btn');
 
 const questionTypeSelect = document.getElementById('question-type-select');
 
@@ -128,7 +151,6 @@ const examPreview = document.getElementById('exam-preview');
 const parseExamBtn = document.getElementById('parse-exam-btn');
 const parsedQuestionsDiv = document.getElementById('parsed-questions');
 const parsedQuestionsList = document.getElementById('parsed-questions-list');
-const batchSaveBtn = document.getElementById('batch-save-btn');
 
 const logoutBtn = document.getElementById('logout-btn');
 const cartIcon = document.getElementById('cart-icon');
@@ -332,10 +354,6 @@ function setupEventListeners() {
         removeExamBtn.addEventListener('click', removeExam);
     }
 
-    if (batchSaveBtn) {
-        batchSaveBtn.addEventListener('click', handleBatchSave);
-    }
-
     if (logoutBtn) {
         logoutBtn.addEventListener('click', handleLogout);
     }
@@ -384,6 +402,48 @@ function setupEventListeners() {
 
     if (reloadStudentsBtn) {
         reloadStudentsBtn.addEventListener('click', () => loadStudents(true));
+    }
+
+    if (batchUploadBtn) {
+        batchUploadBtn.addEventListener('click', openBatchHomeworkModal);
+    }
+    if (batchUploadTrigger) {
+        batchUploadTrigger.addEventListener('click', () => batchFileInput?.click());
+    }
+    if (batchUploadZone) {
+        batchUploadZone.addEventListener('click', (e) => {
+            if (e.target === batchUploadZone || e.target.closest('.upload-icon') || e.target.tagName === 'H4' || e.target.tagName === 'P') {
+                batchFileInput?.click();
+            }
+        });
+    }
+    if (batchFileInput) {
+        batchFileInput.addEventListener('change', handleBatchFileChange);
+    }
+    if (batchParseBtn) {
+        batchParseBtn.addEventListener('click', handleBatchParse);
+    }
+    if (batchResultsTableWrapper) {
+        batchResultsTableWrapper.addEventListener('change', handleBatchMappingSelectChange);
+    }
+    if (batchHomeworkModal) {
+        attachModalBackdropHandler(batchHomeworkModal, () => closeModalElement(batchHomeworkModal));
+    }
+    if (batchSaveBtn) {
+        batchSaveBtn.addEventListener('click', handleBatchSave);
+    }
+
+    if (classReportBtn) {
+        classReportBtn.addEventListener('click', openClassReportModal);
+    }
+    if (classReportGenerateBtn) {
+        classReportGenerateBtn.addEventListener('click', handleClassReportGenerate);
+    }
+    if (classReportDownloadBtn) {
+        classReportDownloadBtn.addEventListener('click', handleClassReportDownload);
+    }
+    if (classReportModal) {
+        attachModalBackdropHandler(classReportModal, () => closeModalElement(classReportModal));
     }
 
     if (studentsTableBody) {
@@ -838,7 +898,9 @@ function resetHomeworkState() {
         exportId: null,
         paperTitle: '',
         results: [],
-        raw: null
+        raw: null,
+        detectedStudentId: '',
+        detectedStudentName: ''
     };
 
     if (homeworkExportSelect) {
@@ -868,6 +930,10 @@ function resetHomeworkState() {
     }
     if (homeworkResultsList) {
         homeworkResultsList.innerHTML = '';
+    }
+    if (homeworkDetectedStudent) {
+        homeworkDetectedStudent.classList.add('hidden');
+        homeworkDetectedStudent.textContent = '';
     }
     if (homeworkSaveBtn) {
         homeworkSaveBtn.disabled = true;
