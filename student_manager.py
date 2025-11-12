@@ -653,17 +653,26 @@ class StudentManager:
                     (export_id,),
                 ).fetchall()
             else:
-                rows = conn.execute(
-                    """
-                    SELECT hr.*, s.name AS roster_name
-                    FROM homework_results AS hr
-                    LEFT JOIN students AS s
-                        ON hr.student_id = s.student_id AND s.user_id = ?
-                    WHERE hr.export_id = ?
-                    ORDER BY hr.student_id ASC, hr.id ASC
-                    """,
-                    (user_id, export_id),
-                ).fetchall()
+                # 附加 students 数据库以支持跨数据库 JOIN
+                # 使用绝对路径确保 ATTACH 正常工作
+                student_db_abs_path = os.path.abspath(STUDENT_DATABASE_PATH)
+                # SQLite 的 ATTACH DATABASE 不支持参数化查询，需要转义单引号
+                escaped_path = student_db_abs_path.replace("'", "''")
+                conn.execute(f"ATTACH DATABASE '{escaped_path}' AS student_db")
+                try:
+                    rows = conn.execute(
+                        """
+                        SELECT hr.*, s.name AS roster_name
+                        FROM homework_results AS hr
+                        LEFT JOIN student_db.students AS s
+                            ON hr.student_id = s.student_id AND s.user_id = ?
+                        WHERE hr.export_id = ?
+                        ORDER BY hr.student_id ASC, hr.id ASC
+                        """,
+                        (user_id, export_id),
+                    ).fetchall()
+                finally:
+                    conn.execute("DETACH DATABASE student_db")
             return [dict(row) for row in rows]
         finally:
             conn.close()
