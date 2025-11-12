@@ -5,7 +5,7 @@ import argparse
 import shutil
 import uuid
 from pathlib import Path
-from typing import Iterable, Tuple
+from typing import Iterable, List, Tuple
 import sys
 sys.path.append("../easy_quiz")
 
@@ -14,7 +14,7 @@ from logger import get_logger
 from ocr_client import DeepSeekOCRClient
 from question_manager import QuestionManager
 from system_manager import SystemManager
-from utils import apply_filename_replacements, convert_pdf_to_images, save_ocr_images
+from utils import apply_filename_replacements, save_ocr_images
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "bmp", "pdf"}
 UPLOAD_ROOT = Path("uploads")
@@ -59,47 +59,38 @@ def process_file(
     stored_path = upload_images_dir / unique_filename
     shutil.copy2(source_path, stored_path)
 
-    markdown_segments = []
+    logger.log_system_info(f"批量解析 - OCR文件: {stored_path}")
+    ocr_result = ocr_client.ocr_image(str(stored_path))
+    pages = ocr_result.get("pages") or []
+
+    markdown_segments: List[str] = []
     image_filename_mapping = {}
 
-    if ext == ".pdf":
-        logger.log_system_info(f"批量解析 - 处理PDF试卷: {stored_path}")
-        page_image_paths = convert_pdf_to_images(str(stored_path), str(upload_images_dir))
-        for page_index, image_path in page_image_paths:
-            logger.log_system_info(f"批量解析 - OCR PDF第{page_index}页: {image_path}")
-            ocr_result = ocr_client.ocr_image(image_path)
-            page_markdown = ocr_result.get("markdown", "")
-            ocr_images = ocr_result.get("images", [])
-            logger.log_ocr_result(ocr_result.get("request_id", "unknown"), page_markdown, len(ocr_images))
-
-            page_mapping, replacements = save_ocr_images(
-                ocr_images,
-                str(upload_root),
-                logger,
-                suffix=f"_p{page_index}",
-            )
-            image_filename_mapping.update(page_mapping)
-            page_markdown = apply_filename_replacements(page_markdown, replacements)
-            if page_markdown:
-                markdown_segments.append(page_markdown)
-
-        markdown_content = "\n\n".join(markdown_segments)
-        batch_size = EXAM_PARSE_ANSWER_BATCH_SIZE
-    else:
-        logger.log_system_info(f"批量解析 - OCR文件: {stored_path}")
-        ocr_result = ocr_client.ocr_image(str(stored_path))
-        markdown_content = ocr_result.get("markdown", "")
-        ocr_images = ocr_result.get("images", [])
-        logger.log_ocr_result(ocr_result.get("request_id", "unknown"), markdown_content, len(ocr_images))
+    for page in pages:
+        page_number = page.get("page")
+        logger.log_system_info(f"批量解析 - OCR第{page_number}页: {stored_path}")
+        page_markdown = page.get("markdown") or ""
+        page_images = page.get("images") or []
+        logger.log_ocr_result(page.get("request_id", "unknown"), page_markdown, len(page_images))
 
         page_mapping, replacements = save_ocr_images(
-            ocr_images,
+            page_images,
             str(upload_root),
             logger,
+            suffix=page.get("suggested_suffix", ""),
         )
         image_filename_mapping.update(page_mapping)
-        markdown_content = apply_filename_replacements(markdown_content, replacements)
-        batch_size = None
+        page_markdown = apply_filename_replacements(page_markdown, replacements)
+        if page_markdown:
+            markdown_segments.append(page_markdown)
+
+    if not markdown_segments:
+        markdown_content = ocr_result.get("markdown", "") or ""
+        if markdown_content:
+            markdown_segments.append(markdown_content)
+
+    markdown_content = "\n\n".join(segment for segment in markdown_segments if segment)
+    batch_size = EXAM_PARSE_ANSWER_BATCH_SIZE if ext == ".pdf" else None
 
     if not markdown_content.strip():
         logger.log_warning(f"批量解析 - OCR内容为空，跳过文件: {source_path}", "批量解析")

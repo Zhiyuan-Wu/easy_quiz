@@ -100,6 +100,7 @@ const homeworkExportOptions = document.getElementById('homework-export-options')
 const homeworkFileInput = document.getElementById('homework-file-input');
 const homeworkUploadZone = document.getElementById('homework-upload-zone');
 const homeworkUploadBtn = document.getElementById('homework-upload-btn');
+const homeworkClipboardBtn = document.getElementById('homework-clipboard-btn');
 const homeworkPreview = document.getElementById('homework-preview');
 const removeHomeworkBtn = document.getElementById('remove-homework-btn');
 const homeworkResultsContainer = document.getElementById('homework-results');
@@ -143,10 +144,12 @@ const recommendationList = document.getElementById('recommendation-list');
 
 const imageUpload = document.getElementById('image-upload');
 const uploadBtn = document.getElementById('upload-btn');
+const imageClipboardBtn = document.getElementById('image-clipboard-btn');
 const imagePreview = document.getElementById('image-preview');
 
 const examUpload = document.getElementById('exam-upload');
 const examUploadBtn = document.getElementById('exam-upload-btn');
+const examClipboardBtn = document.getElementById('exam-clipboard-btn');
 const examPreview = document.getElementById('exam-preview');
 const parseExamBtn = document.getElementById('parse-exam-btn');
 const parsedQuestionsDiv = document.getElementById('parsed-questions');
@@ -312,6 +315,9 @@ function setupEventListeners() {
         uploadBtn.addEventListener('click', () => imageUpload.click());
         imageUpload.addEventListener('change', handleImageUpload);
     }
+    if (imageClipboardBtn) {
+        imageClipboardBtn.addEventListener('click', handleQuestionClipboard);
+    }
 
     if (examUploadBtn && examUpload) {
         examUploadBtn.addEventListener('click', (e) => {
@@ -319,6 +325,9 @@ function setupEventListeners() {
             examUpload.click();
         });
         examUpload.addEventListener('change', handleExamUpload);
+    }
+    if (examClipboardBtn) {
+        examClipboardBtn.addEventListener('click', handleExamClipboard);
     }
     if (parseExamBtn) {
         parseExamBtn.addEventListener('click', handleParseExam);
@@ -461,6 +470,9 @@ function setupEventListeners() {
     }
     if (homeworkUploadBtn) {
         homeworkUploadBtn.addEventListener('click', () => homeworkFileInput?.click());
+    }
+    if (homeworkClipboardBtn) {
+        homeworkClipboardBtn.addEventListener('click', handleHomeworkClipboard);
     }
     if (homeworkUploadZone) {
         homeworkUploadZone.addEventListener('click', (e) => {
@@ -1043,6 +1055,99 @@ function getScoreColor(score) {
     const end = [31, 132, 89];
     const rgb = start.map((value, index) => Math.round(value + (end[index] - value) * clamped));
     return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+}
+
+async function readClipboardImageFile() {
+    if (!navigator.clipboard || typeof navigator.clipboard.read !== 'function') {
+        showMessage('当前浏览器不支持从剪贴板读取图片，请使用常规上传方式。', 'warning');
+        return null;
+    }
+    try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+            const types = item.types || [];
+            const imageType = types.find((type) => type === 'image/png' || type === 'image/jpeg' || type === 'image/jpg');
+            if (!imageType) {
+                continue;
+            }
+            const blob = await item.getType(imageType);
+            const extension = imageType === 'image/png' ? 'png' : 'jpg';
+            const filename = `clipboard-${Date.now()}.${extension}`;
+            return new File([blob], filename, { type: imageType });
+        }
+        showMessage('剪贴板中未检测到图片，请先使用截屏工具复制图片后再试。', 'warning');
+    } catch (error) {
+        if (error?.name === 'NotAllowedError') {
+            showMessage('读取剪贴板失败：请允许浏览器访问剪贴板或手动上传文件。', 'error');
+        } else {
+            showMessage('读取剪贴板图片失败: ' + error.message, 'error');
+        }
+    }
+    return null;
+}
+
+function createFileListFromFile(file) {
+    if (typeof DataTransfer !== 'undefined') {
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        return dataTransfer.files;
+    }
+    return {
+        length: 1,
+        0: file,
+        item: () => file,
+        [Symbol.iterator]: function* () {
+            yield file;
+        },
+    };
+}
+
+async function handleExamClipboard() {
+    const clipboardFile = await readClipboardImageFile();
+    if (!clipboardFile) {
+        return;
+    }
+    const files = createFileListFromFile(clipboardFile);
+    if (examUpload) {
+        examUpload.files = files;
+    }
+    const handler = window.handleExamUpload;
+    if (typeof handler === 'function') {
+        handler({ target: { files } });
+    } else {
+        showMessage('无法处理剪贴板图片，请稍后重试。', 'error');
+    }
+}
+
+async function handleHomeworkClipboard() {
+    const clipboardFile = await readClipboardImageFile();
+    if (!clipboardFile) {
+        return;
+    }
+    const files = createFileListFromFile(clipboardFile);
+    if (homeworkFileInput) {
+        homeworkFileInput.files = files;
+    }
+    const handler = window.handleHomeworkFileUpload;
+    if (typeof handler === 'function') {
+        handler({ target: { files } });
+    } else {
+        showMessage('无法处理剪贴板图片，请稍后重试。', 'error');
+    }
+}
+
+async function handleQuestionClipboard() {
+    const clipboardFile = await readClipboardImageFile();
+    if (!clipboardFile) {
+        return;
+    }
+    const files = createFileListFromFile(clipboardFile);
+    const handler = window.handleImageUpload;
+    if (typeof handler === 'function') {
+        handler({ target: { files } });
+    } else {
+        showMessage('无法处理剪贴板图片，请稍后重试。', 'error');
+    }
 }
 
 // 将部分函数暴露到全局以供其他脚本使用

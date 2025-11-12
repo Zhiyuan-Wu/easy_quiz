@@ -1,7 +1,7 @@
 import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -44,16 +44,39 @@ class DeepSeekOCRClient:
         if suffix not in {".png", ".jpg", ".jpeg"}:
             raise ValueError("Only PNG/JPG images or PDF documents are supported")
 
-        return self._ocr_single_image(path_obj)
+        page_result = self._ocr_single_image(path_obj, page_number=1, suggested_suffix="")
+        return {
+            "request_id": page_result["request_id"],
+            "markdown": page_result["markdown"],
+            "text": page_result["markdown"],
+            "images": page_result["images"],
+            "pages": [page_result],
+        }
 
-    def _ocr_single_image(self, image_path: Path) -> Dict[str, Any]:
-        """对单张图片执行 OCR 请求。"""
+    def _ocr_single_image(
+        self,
+        image_path: Path,
+        page_number: Optional[int] = None,
+        suggested_suffix: str = "",
+    ) -> Dict[str, Any]:
+        """对单张图片执行 OCR 请求，并携带分页信息。"""
         with open(image_path, "rb") as file_obj:
             files = {"file": (image_path.name, file_obj, "image/png")}
             response = requests.post(self.ocr_endpoint, files=files)
 
         response.raise_for_status()
-        return response.json()
+        payload = response.json() or {}
+        page_markdown = payload.get("markdown") or payload.get("text") or ""
+        page_images = payload.get("images") or []
+
+        return {
+            "page": page_number,
+            "request_id": payload.get("request_id"),
+            "markdown": page_markdown,
+            "images": page_images,
+            "suggested_suffix": suggested_suffix or "",
+            "raw": payload,
+        }
 
     def _ocr_pdf(self, pdf_path: Path) -> Dict[str, Any]:
         """将 PDF 拆分为页面并合并 OCR 结果。"""
@@ -74,8 +97,13 @@ class DeepSeekOCRClient:
                 }
 
             for page_index, image_path in page_images:
-                page_result = self._ocr_single_image(Path(image_path))
-                page_markdown = page_result.get("markdown") or page_result.get("text") or ""
+                suggested_suffix = f"_p{page_index}"
+                page_result = self._ocr_single_image(
+                    Path(image_path),
+                    page_number=page_index,
+                    suggested_suffix=suggested_suffix,
+                )
+                page_markdown = page_result.get("markdown") or ""
                 page_images_data = page_result.get("images") or []
 
                 if page_markdown.strip():
@@ -83,14 +111,7 @@ class DeepSeekOCRClient:
                 if page_images_data:
                     all_images.extend(page_images_data)
 
-                page_details.append(
-                    {
-                        "page": page_index,
-                        "request_id": page_result.get("request_id"),
-                        "markdown": page_markdown,
-                        "images": page_images_data,
-                    }
-                )
+                page_details.append(page_result)
 
         combined_markdown = "\n\n".join(markdown_segments)
         return {

@@ -350,8 +350,9 @@ async function handleHomeworkParse() {
 
     const formData = new FormData();
     formData.append('export_id', exportId);
-    formData.append('student_name', homeworkState.student.name || '');
-    formData.append('file', file);
+    formData.append('force_student_id', homeworkState.student.student_id || '');
+    formData.append('force_student_name', homeworkState.student.name || '');
+    formData.append('files', file);
 
     if (!homeworkParseBtn) {
         return;
@@ -373,7 +374,7 @@ async function handleHomeworkParse() {
     }, config.interval);
 
     try {
-        const response = await fetch(`/api/students/${homeworkState.student.student_id}/homework/parse`, {
+        const response = await fetch('/api/students/homework/batch-parse', {
             method: 'POST',
             body: formData
         });
@@ -384,12 +385,26 @@ async function handleHomeworkParse() {
             return;
         }
 
-        homeworkState.exportId = result.export_id;
+        const mapping = result.mapping || {};
+        const targetId = homeworkState.student.student_id || '';
+        let entry = mapping[targetId];
+        if (!entry && Array.isArray(result.order) && result.order.length > 0) {
+            entry = mapping[result.order[0]];
+        }
+
+        if (!entry) {
+            const firstFailure = Array.isArray(result.failures) ? result.failures[0] : null;
+            const failureMessage = firstFailure?.message || '未找到解析结果';
+            showMessage('作业解析失败: ' + failureMessage, 'error');
+            return;
+        }
+
+        homeworkState.exportId = result.export_id || exportId;
         homeworkState.paperTitle = result.paper_title || '';
-        homeworkState.results = Array.isArray(result.results) ? result.results : [];
-        homeworkState.raw = result;
-        homeworkState.detectedStudentId = result.detected_student_id || '';
-        homeworkState.detectedStudentName = result.detected_student_name || '';
+        homeworkState.results = Array.isArray(entry.results) ? entry.results : [];
+        homeworkState.raw = entry;
+        homeworkState.detectedStudentId = entry.detected_student_id || '';
+        homeworkState.detectedStudentName = entry.detected_student_name || '';
         updateHomeworkDetectedStudentHint();
 
         renderHomeworkResults(homeworkState.results);
@@ -1214,10 +1229,6 @@ function handleBatchMappingSelectChange(event) {
     entry.student_id = newId;
     entry.student_name = getStudentNameById(newId) || entry.student_name || '';
     entry.assignment_source = 'manual';
-    entry.results = (entry.results || []).map((item) => ({
-        ...item,
-        student_id: newId,
-    }));
     batchState.mapping[newId] = entry;
     const idx = batchState.order.indexOf(entryId);
     if (idx !== -1) {

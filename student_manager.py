@@ -826,8 +826,7 @@ class StudentManager:
             "question_number": 原始题号（数字），
             "student_answer": "学生的作答文本",
             "score": 浮点数0~1,
-            "feedback": "针对该题的点评，可为空",
-            "student_id": "同学号，如无法识别请写空字符串"
+            "feedback": "针对该题的点评，可为空"
         }}
     ]
 }}
@@ -898,23 +897,10 @@ class StudentManager:
             if not isinstance(results, list):
                 raise ValueError("LLM返回格式缺少results数组")
 
-            normalized_results: List[Dict[str, Any]] = []
-            for item in results:
-                if not isinstance(item, dict):
-                    continue
-                item_copy = dict(item)
-                item_student_id = item_copy.get("student_id")
-                if item_student_id is None:
-                    item_student_id = detected_student_id
-                if not isinstance(item_student_id, str):
-                    item_student_id = str(item_student_id)
-                item_copy["student_id"] = item_student_id.strip()
-                normalized_results.append(item_copy)
-
             return {
                 "detected_student_id": detected_student_id.strip(),
                 "detected_student_name": detected_student_name.strip(),
-                "results": normalized_results,
+                "results": [item for item in results if isinstance(item, dict)],
             }
         except Exception as exc:
             self.logger.log_error(exc, "解析作业批改结果失败")

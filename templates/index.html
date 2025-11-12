@@ -138,9 +138,14 @@
                             <h3>点击或拖拽上传试卷文件</h3>
                             <p>支持 PNG、JPG、JPEG、PDF 格式，最大 16MB</p>
                             <input type="file" id="exam-upload" accept="image/*,application/pdf" style="display: none;">
-                        <button type="button" id="exam-upload-btn" class="btn btn-primary">
-                            <i class="fas fa-upload"></i> 选择文件
-                        </button>
+                          <div class="upload-actions">
+                              <button type="button" id="exam-upload-btn" class="btn btn-primary">
+                                  <i class="fas fa-upload"></i> 选择文件
+                              </button>
+                              <button type="button" id="exam-clipboard-btn" class="btn btn-secondary">
+                                  <i class="fas fa-paste"></i> 粘贴图片
+                              </button>
+                          </div>
                     </div>
                     
                     <div id="exam-preview" class="exam-preview" style="display: none;">
@@ -369,9 +374,14 @@
                         </label>
                         <div class="image-upload-container">
                             <input type="file" id="image-upload" name="images" multiple accept="image/*" style="display: none;">
-                            <button type="button" id="upload-btn" class="btn btn-secondary">
-                                <i class="fas fa-upload"></i> 选择图片
-                            </button>
+                            <div class="upload-actions">
+                                <button type="button" id="upload-btn" class="btn btn-secondary">
+                                    <i class="fas fa-upload"></i> 选择图片
+                                </button>
+                                <button type="button" id="image-clipboard-btn" class="btn btn-secondary">
+                                    <i class="fas fa-paste"></i> 粘贴图片
+                                </button>
+                            </div>
                             <div id="image-preview" class="image-preview"></div>
                         </div>
                     </div>
@@ -476,10 +486,15 @@
                             </div>
                             <h4>点击或拖拽上传作业图片</h4>
                             <p>支持 PNG、JPG、JPEG 格式，最大 16MB</p>
-                            <input type="file" id="homework-file-input" accept="image/*" style="display: none;">
-                            <button type="button" id="homework-upload-btn" class="btn btn-primary">
-                                <i class="fas fa-upload"></i> 选择文件
-                            </button>
+                              <input type="file" id="homework-file-input" accept="image/*" style="display: none;">
+                              <div class="upload-actions">
+                                  <button type="button" id="homework-upload-btn" class="btn btn-primary">
+                                      <i class="fas fa-upload"></i> 选择文件
+                                  </button>
+                                  <button type="button" id="homework-clipboard-btn" class="btn btn-secondary">
+                                      <i class="fas fa-paste"></i> 粘贴图片
+                                  </button>
+                              </div>
                         </div>
                         <div id="homework-preview" class="homework-preview" style="display: none;">
                             <div class="preview-header">
