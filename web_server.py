@@ -8,10 +8,12 @@ from functools import wraps
 import base64
 import json
 import os
+import re
 import uuid
 import time
 from datetime import datetime, timezone
 from io import BytesIO
+from typing import Any, Dict, List, Optional
 from werkzeug.utils import secure_filename
 from question_manager import QuestionManager
 from ocr_client import DeepSeekOCRClient
@@ -34,9 +36,10 @@ from pdf2image import convert_from_bytes
 import traceback
 from utils import (
     apply_filename_replacements,
-    convert_pdf_to_images,
     save_ocr_images,
 )
+from class_report import ClassReportGenerator
+from homework_service import HomeworkBatchProcessor, HomeworkFileEntry
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
@@ -115,6 +118,21 @@ student_manager = StudentManager(
 if not os.path.exists(HOMEWORK_UPLOAD_DIR):
     os.makedirs(HOMEWORK_UPLOAD_DIR, exist_ok=True)
 
+homework_processor = HomeworkBatchProcessor(
+    ocr_client=ocr_client,
+    student_manager=student_manager,
+    question_manager=question_manager,
+    system_manager=system_manager,
+    upload_root=app.config['UPLOAD_FOLDER'],
+    logger=logger,
+)
+
+class_report_generator = ClassReportGenerator(
+    student_manager=student_manager,
+    system_manager=system_manager,
+    question_manager=question_manager,
+)
+
 # 登录验证装饰器
 def login_required(f):
     """登录保护装饰器，未登录用户将被跳转至登录页。
@@ -151,6 +169,8 @@ def allowed_file(filename):
         若扩展名合法返回 True，否则返回 False。
     """
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
 
 
 def parse_iso_datetime(value):
@@ -451,105 +471,283 @@ def parse_student_homework(student_id):
     try:
         file.save(save_path)
 
-        export_data = system_manager.get_export_by_id(export_id)
-        if not export_data or export_data.get('user_id') != session['user_id']:
-            return jsonify({'success': False, 'message': '无法访问指定的试卷'}), 400
+        entry = HomeworkFileEntry(
+            original_filename=filename,
+            stored_filename=unique_filename,
+            stored_path=save_path,
+        )
 
-        question_ids = export_data.get('question_ids') or []
-        questions = []
-        for qid in question_ids:
-            question = question_manager.get_question_by_id(qid, session['user_id'])
-            if question:
-                questions.append(question)
+        batch_result = homework_processor.process_batch(
+            [entry],
+            export_id,
+            user_id,
+            force_student_id=student_id,
+            force_student_name=student_name,
+        )
 
-        if not questions:
-            return jsonify({'success': False, 'message': '所选试卷暂无题目信息'}), 400
+        mapping: Dict[str, Dict[str, Any]] = batch_result.get("mapping", {})
+        mapping_entry = mapping.get(student_id)
+        if not mapping_entry and batch_result.get("order"):
+            first_key = batch_result["order"][0]
+            mapping_entry = mapping.get(first_key)
 
-        paper_title = export_data.get('title') or '未命名试卷'
-
-        file_ext = os.path.splitext(filename)[1].lower()
-        if file_ext == '.pdf':
-            pages_dir = os.path.join(HOMEWORK_UPLOAD_DIR, 'pdf_pages')
-            page_image_paths = convert_pdf_to_images(save_path, pages_dir)
-            ocr_segments = []
-            for page_index, image_path in page_image_paths:
-                logger.log_system_info(f"作业OCR - PDF第{page_index}页: {image_path}")
-                page_result = ocr_client.ocr_image(image_path)
-                page_text = page_result.get('markdown') or page_result.get('text') or ''
-                if page_text:
-                    ocr_segments.append(page_text)
-            ocr_text = '\n\n'.join(ocr_segments)
-        else:
-            ocr_result = ocr_client.ocr_image(save_path)
-            ocr_text = ocr_result.get('markdown') or ocr_result.get('text') or ''
-
-        llm_results = student_manager.parse_homework_ocr(paper_title, questions, ocr_text)
-
-        results_by_id = {}
-        results_by_number = {}
-        for item in llm_results:
-            if not isinstance(item, dict):
-                continue
-            qid_val = item.get('question_id')
-            qnum_val = item.get('question_number')
-            try:
-                if qid_val is not None:
-                    results_by_id[int(qid_val)] = item
-            except (TypeError, ValueError):
-                pass
-            try:
-                if qnum_val is not None:
-                    results_by_number[int(qnum_val)] = item
-            except (TypeError, ValueError):
-                pass
-
-        normalized_results = []
-        for index, question in enumerate(questions, start=1):
-            qid = question.get('id')
-            raw_item = None
-            if qid in results_by_id:
-                raw_item = results_by_id[qid]
-            elif index in results_by_number:
-                raw_item = results_by_number[index]
-
-            student_answer = ''
-            score = 0.0
-            feedback = ''
-
-            if raw_item:
-                student_answer = raw_item.get('student_answer') or ''
-                feedback = raw_item.get('feedback') or ''
-                try:
-                    score = float(raw_item.get('score', 0))
-                except (TypeError, ValueError):
-                    score = 0.0
-                score = max(0.0, min(1.0, score))
-
-            normalized_results.append({
-                'question_id': qid,
-                'question_number': index,
-                'original_question': question.get('latex_content'),
-                'reference_answer': question.get('reference_answer'),
-                'student_answer': student_answer,
-                'score': round(score, 4),
-                'feedback': feedback,
-                'question_type': question.get('question_type'),
-                'tags': question.get('tags', []),
-                'source': question.get('source'),
-            })
+        if not mapping_entry:
+            raise ValueError("作业解析失败，未生成有效结果")
 
         return jsonify({
             'success': True,
-            'paper_title': paper_title,
+            'paper_title': batch_result.get('paper_title'),
             'student': serialize_student(student_record),
             'export_id': export_id,
-            'results': normalized_results,
+            'results': mapping_entry.get('results', []),
+            'detected_student_id': mapping_entry.get('detected_student_id', ''),
+            'detected_student_name': mapping_entry.get('detected_student_name', ''),
         })
     except Exception as e:
         log_error_with_details(e, f"作业解析失败 - 学生: {student_id}", 
                               student_id=student_id, export_id=export_id, 
                               student_name=student_name, filename=file.filename if 'file' in locals() else None)
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/students/homework/batch-parse', methods=['POST'])
+@login_required
+def batch_parse_homework():
+    """批量解析作业文件的接口。"""
+    user_id = session['user_id']
+    files = request.files.getlist('files')
+    if not files:
+        files = request.files.getlist('file')
+    if not files:
+        return jsonify({'success': False, 'message': '请上传作业文件'}), 400
+
+    export_id_raw = request.form.get('export_id')
+    if not export_id_raw:
+        return jsonify({'success': False, 'message': '请选择关联的试卷'}), 400
+
+    try:
+        export_id = int(export_id_raw)
+    except ValueError:
+        return jsonify({'success': False, 'message': '试卷信息无效'}), 400
+
+    force_student_id = (request.form.get('force_student_id') or '').strip() or None
+    force_student_name = (request.form.get('force_student_name') or '').strip() or None
+
+    entries: List[HomeworkFileEntry] = []
+    pre_failures: List[Dict[str, Any]] = []
+
+    for uploaded in files:
+        original_filename = getattr(uploaded, 'filename', '') or ''
+        if not original_filename:
+            continue
+
+        if not allowed_file(original_filename):
+            pre_failures.append({'filename': original_filename, 'message': '文件格式不支持'})
+            continue
+
+        filename = secure_filename(original_filename) or f"upload_{uuid.uuid4().hex}.dat"
+        unique_filename = f"{uuid.uuid4().hex}_{filename}"
+        save_path = os.path.join(HOMEWORK_UPLOAD_DIR, unique_filename)
+
+        try:
+            uploaded.save(save_path)
+        except Exception as exc:  # noqa: BLE001
+            log_error_with_details(exc, "批量作业上传保存失败", filename=original_filename)
+            pre_failures.append({'filename': original_filename, 'message': '文件保存失败'})
+            continue
+
+        entries.append(
+            HomeworkFileEntry(
+                original_filename=original_filename,
+                stored_filename=unique_filename,
+                stored_path=save_path,
+            )
+        )
+
+    if not entries and pre_failures:
+        return jsonify({
+            'success': False,
+            'paper_title': '',
+            'export_id': export_id,
+            'questions': [],
+            'mapping': {},
+            'order': [],
+            'failures': pre_failures,
+        })
+
+    try:
+        batch_result = homework_processor.process_batch(
+            entries,
+            export_id,
+            user_id,
+            force_student_id=force_student_id,
+            force_student_name=force_student_name,
+        )
+        failures = batch_result.get('failures', [])
+        if pre_failures:
+            failures.extend(pre_failures)
+
+        return jsonify({
+            'success': True,
+            'paper_title': batch_result.get('paper_title'),
+            'export_id': export_id,
+            'questions': batch_result.get('questions', []),
+            'mapping': batch_result.get('mapping', {}),
+            'order': batch_result.get('order', []),
+            'failures': failures,
+        })
+    except Exception as exc:  # noqa: BLE001
+        log_error_with_details(exc, "批量作业解析失败", export_id=export_id)
+        return jsonify({'success': False, 'message': str(exc)}), 500
+
+
+@app.route('/api/students/homework/batch-save', methods=['POST'])
+@login_required
+def batch_save_homework():
+    """批量保存作业批改结果的接口。"""
+    user_id = session['user_id']
+    data = request.get_json() or {}
+    export_id_raw = data.get('export_id')
+    paper_title = data.get('paper_title') or ''
+    entries = data.get('students') or []
+
+    if not export_id_raw:
+        return jsonify({'success': False, 'message': '缺少试卷信息'}), 400
+
+    try:
+        export_id = int(export_id_raw)
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'message': '试卷信息无效'}), 400
+
+    if not entries:
+        return jsonify({'success': False, 'message': '没有可保存的作业结果'}), 400
+
+    saved: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, Any]] = []
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+
+        student_id = (entry.get('student_id') or '').strip()
+        if not student_id or student_id.startswith('unknown_id'):
+            skipped.append({'student_id': student_id or '', 'reason': '未指定有效学生'})
+            continue
+
+        student_name = (entry.get('student_name') or '').strip()
+        results = entry.get('results') or []
+        if not results:
+            skipped.append({'student_id': student_id, 'reason': '缺少作业结果'})
+            continue
+
+        student = student_manager.get_student(student_id, user_id)
+        if not student:
+            if not student_name:
+                skipped.append({'student_id': student_id, 'reason': '缺少学生姓名'})
+                continue
+            student = student_manager.add_student(student_id, student_name, user_id)
+        else:
+            student_name = student.get('name') or student_name
+
+        items: List[HomeworkItem] = []
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            try:
+                score = float(result.get('score', 0))
+            except (TypeError, ValueError):
+                score = 0.0
+            score = max(0.0, min(1.0, score))
+            item = HomeworkItem(
+                question_id=result.get('question_id'),
+                question_number=str(result.get('question_number')),
+                original_question=result.get('original_question') or '',
+                reference_answer=result.get('reference_answer') or '',
+                student_answer=result.get('student_answer') or '',
+                score=score,
+                feedback=result.get('feedback') or '',
+            )
+            items.append(item)
+
+        if not items:
+            skipped.append({'student_id': student_id, 'reason': '作业结果格式无效'})
+            continue
+
+        session_uid = student_manager.record_homework_results(
+            student_id=student_id,
+            student_name=student_name,
+            export_id=export_id,
+            paper_title=paper_title,
+            items=items,
+            user_id=user_id,
+            raw_payload=entry,
+        )
+        saved.append({'student_id': student_id, 'session_uid': session_uid})
+
+    return jsonify({
+        'success': True,
+        'saved': saved,
+        'skipped': skipped,
+    })
+
+
+@app.route('/api/students/class-report', methods=['POST'])
+@login_required
+def generate_class_report():
+    """生成全班作业报告的数据。"""
+    user_id = session['user_id']
+    data = request.get_json() or {}
+    export_id_raw = data.get('export_id')
+    if not export_id_raw:
+        return jsonify({'success': False, 'message': '缺少试卷信息'}), 400
+
+    try:
+        export_id = int(export_id_raw)
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'message': '试卷信息无效'}), 400
+
+    try:
+        payload = class_report_generator.generate_payload(export_id, user_id)
+    except Exception as exc:
+        log_error_with_details(exc, "生成全班报告失败", export_id=export_id)
+        return jsonify({'success': False, 'message': str(exc)}), 500
+
+    return jsonify({
+        'success': True,
+        'paper_title': payload.get('paper_title'),
+        'section_order': payload.get('section_order', []),
+        'sections': payload.get('sections', {}),
+        'question_count': payload.get('question_count', 0),
+        'student_count': payload.get('student_count', 0),
+    })
+
+
+@app.route('/api/students/class-report/download', methods=['POST'])
+@login_required
+def download_class_report():
+    """生成并下载全班作业报告PDF。"""
+    user_id = session['user_id']
+    data = request.get_json() or {}
+    export_id_raw = data.get('export_id')
+    if not export_id_raw:
+        return jsonify({'success': False, 'message': '缺少试卷信息'}), 400
+
+    try:
+        export_id = int(export_id_raw)
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'message': '试卷信息无效'}), 400
+
+    try:
+        pdf_payload = class_report_generator.generate_pdf(export_id, user_id)
+    except Exception as exc:
+        log_error_with_details(exc, "导出全班报告PDF失败", export_id=export_id)
+        return jsonify({'success': False, 'message': str(exc)}), 500
+
+    return jsonify({
+        'success': True,
+        'paper_title': pdf_payload.get('paper_title'),
+        'pdf_base64': pdf_payload.get('pdf_base64'),
+    })
 
 
 @app.route('/api/students/<student_id>/homework/save', methods=['POST'])
@@ -1186,42 +1384,39 @@ def ocr_parse():
             is_pdf = file_extension == 'pdf'
 
             try:
-                markdown_segments = []
-                image_filename_mapping = {}
+                logger.log_system_info(f"开始OCR处理 - 文件: {file_path}")
+                ocr_result = ocr_client.ocr_image(file_path)
+                pages = ocr_result.get('pages') or []
 
-                if is_pdf:
-                    logger.log_system_info(f"开始处理PDF试卷 - 文件: {file_path}")
-                    page_image_paths = convert_pdf_to_images(file_path, upload_images_dir)
-                    for page_index, image_path in page_image_paths:
-                        logger.log_system_info(f"开始OCR处理 - PDF第{page_index}页: {image_path}")
-                        ocr_result = ocr_client.ocr_image(image_path)
-                        page_markdown = ocr_result.get('markdown', '')
-                        ocr_images = ocr_result.get('images', [])
-                        logger.log_ocr_result(ocr_result.get('request_id', 'unknown'), page_markdown, len(ocr_images))
+                markdown_segments: List[str] = []
+                image_filename_mapping: Dict[str, str] = {}
 
-                        page_mapping, replacements = save_ocr_images(
-                            ocr_images,
-                            app.config['UPLOAD_FOLDER'],
-                            logger,
-                            suffix=f"_p{page_index}",
-                        )
-                        image_filename_mapping.update(page_mapping)
-                        page_markdown = apply_filename_replacements(page_markdown, replacements)
-                        markdown_segments.append(page_markdown)
-                else:
-                    logger.log_system_info(f"开始OCR处理 - 文件: {file_path}")
-                    ocr_result = ocr_client.ocr_image(file_path)
-                    markdown_content = ocr_result.get('markdown', '')
-                    ocr_images = ocr_result.get('images', [])
-                    logger.log_ocr_result(ocr_result.get('request_id', 'unknown'), markdown_content, len(ocr_images))
+                for page in pages:
+                    page_number = page.get('page')
+                    page_markdown = page.get('markdown') or ''
+                    page_images = page.get('images') or []
+                    request_id = page.get('request_id', 'unknown')
+
+                    logger.log_system_info(
+                        f"OCR页面完成 - 文件: {file_path}, 页码: {page_number}, 请求ID: {request_id}"
+                    )
+                    logger.log_ocr_result(request_id, page_markdown, len(page_images))
 
                     page_mapping, replacements = save_ocr_images(
-                        ocr_images,
+                        page_images,
                         app.config['UPLOAD_FOLDER'],
                         logger,
+                        suffix=page.get('suggested_suffix', ''),
                     )
                     image_filename_mapping.update(page_mapping)
-                    markdown_segments.append(apply_filename_replacements(markdown_content, replacements))
+                    page_text = apply_filename_replacements(page_markdown, replacements)
+                    if page_text:
+                        markdown_segments.append(page_text)
+
+                if not markdown_segments:
+                    fallback_markdown = ocr_result.get('markdown') or ocr_result.get('text') or ''
+                    if fallback_markdown:
+                        markdown_segments.append(fallback_markdown)
 
                 markdown_content = '\n\n'.join(segment for segment in markdown_segments if segment)
                 logger.log_system_info(

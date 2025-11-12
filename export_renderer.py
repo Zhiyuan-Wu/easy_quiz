@@ -32,12 +32,12 @@ TYPE_SETTINGS = {
     "填空题": {
         "display": "填空题",
         "score": 5,
-        "summary": "{display}，每题{score}分，共{total}分。请将答案填写在指定位置，不要写出推导过程。"
+        "summary": "{display}，每题{score}分，共{total}分。将答案填写在指定位置。"
     },
     "解答题": {
         "display": "解答题",
         "score": 10,
-        "summary": "{display}，每题{score}分，共{total}分。请写出完整的解题思路和必要的理由。"
+        "summary": "{display}，每题{score}分，共{total}分。解答应写出文字说明、证明过程或演算步骤。"
     }
 }
 try:

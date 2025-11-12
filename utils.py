@@ -137,3 +137,93 @@ def post_process_latex_content(latex_content: str) -> str:
         processed = re.sub(r'\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}', '', processed)
     
     return processed
+
+
+def normalize_homework_results(
+    questions: List[Dict[str, Any]],
+    llm_results: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """将 LLM 返回的批改结果按照题目顺序补齐并标准化。"""
+    results_by_id: Dict[int, Dict[str, Any]] = {}
+    results_by_number: Dict[int, Dict[str, Any]] = {}
+
+    for item in llm_results or []:
+        if not isinstance(item, dict):
+            continue
+        qid_val = item.get("question_id")
+        qnum_val = item.get("question_number")
+        try:
+            if qid_val is not None:
+                results_by_id[int(qid_val)] = item
+        except (TypeError, ValueError):
+            pass
+        try:
+            if qnum_val is not None:
+                results_by_number[int(qnum_val)] = item
+        except (TypeError, ValueError):
+            pass
+
+    normalized: List[Dict[str, Any]] = []
+    for index, question in enumerate(questions, start=1):
+        qid = question.get("id")
+        raw_item: Dict[str, Any] | None = None
+
+        int_qid: int | None = None
+        try:
+            if qid is not None:
+                int_qid = int(qid)
+        except (TypeError, ValueError):
+            int_qid = None
+
+        if int_qid is not None and int_qid in results_by_id:
+            raw_item = results_by_id[int_qid]
+        elif index in results_by_number:
+            raw_item = results_by_number[index]
+
+        student_answer = ""
+        feedback = ""
+        score_value = 0.0
+
+        if raw_item:
+            student_answer = raw_item.get("student_answer") or ""
+            feedback = raw_item.get("feedback") or ""
+            try:
+                score_value = float(raw_item.get("score", 0))
+            except (TypeError, ValueError):
+                score_value = 0.0
+
+        score_value = max(0.0, min(1.0, score_value))
+
+        normalized.append(
+            {
+                "question_id": qid,
+                "question_number": index,
+                "original_question": question.get("latex_content"),
+                "reference_answer": question.get("reference_answer"),
+                "student_answer": student_answer,
+                "score": round(score_value, 4),
+                "feedback": feedback,
+                "question_type": question.get("question_type"),
+                "tags": question.get("tags", []),
+                "source": question.get("source"),
+            }
+        )
+
+    return normalized
+
+
+def match_student_by_filename(filename: str, roster: List[Dict[str, Any]]) -> Dict[str, Any] | None:
+    """尝试根据文件名匹配学生信息。"""
+    if not filename:
+        return None
+    name_body = os.path.splitext(filename)[0].lower()
+    for student in roster or []:
+        if not isinstance(student, dict):
+            continue
+        sid = str(student.get("student_id") or "").lower()
+        name = str(student.get("name") or "").lower()
+        if sid and sid in name_body:
+            return student
+        if name and name in name_body:
+            return student
+    return None

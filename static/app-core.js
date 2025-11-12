@@ -18,7 +18,9 @@ let homeworkState = {
     exportId: null,
     paperTitle: '',
     results: [],
-    raw: null
+    raw: null,
+    detectedStudentId: '',
+    detectedStudentName: ''
 };
 let exportHistoryCache = null;
 
@@ -81,6 +83,8 @@ const addStudentForm = document.getElementById('add-student-form');
 const submitStudentBtn = document.getElementById('submit-student-btn');
 const addStudentBtn = document.getElementById('add-student-btn');
 const reloadStudentsBtn = document.getElementById('reload-students-btn');
+const batchUploadBtn = document.getElementById('batch-upload-btn');
+const classReportBtn = document.getElementById('class-report-btn');
 const studentIdInput = document.getElementById('student-id-input');
 const studentNameInput = document.getElementById('student-name-input');
 const studentsTableBody = document.getElementById('students-table-body');
@@ -96,12 +100,32 @@ const homeworkExportOptions = document.getElementById('homework-export-options')
 const homeworkFileInput = document.getElementById('homework-file-input');
 const homeworkUploadZone = document.getElementById('homework-upload-zone');
 const homeworkUploadBtn = document.getElementById('homework-upload-btn');
+const homeworkClipboardBtn = document.getElementById('homework-clipboard-btn');
 const homeworkPreview = document.getElementById('homework-preview');
 const removeHomeworkBtn = document.getElementById('remove-homework-btn');
 const homeworkResultsContainer = document.getElementById('homework-results');
 const homeworkResultsList = document.getElementById('homework-results-list');
 const homeworkStudentName = document.getElementById('homework-student-name');
 const homeworkStudentId = document.getElementById('homework-student-id');
+const homeworkDetectedStudent = document.getElementById('homework-detected-student');
+const batchHomeworkModal = document.getElementById('batch-homework-modal');
+const batchExportSelect = document.getElementById('batch-export-select');
+const batchExportOptions = document.getElementById('batch-export-options');
+const batchFileInput = document.getElementById('batch-file-input');
+const batchUploadTrigger = document.getElementById('batch-upload-trigger');
+const batchUploadSummary = document.getElementById('batch-upload-summary');
+const batchUploadZone = document.getElementById('batch-upload-zone');
+const batchParseBtn = document.getElementById('batch-parse-btn');
+const batchResultsContainer = document.getElementById('batch-results-container');
+const batchResultsTableWrapper = document.getElementById('batch-results-table-wrapper');
+const batchSaveBtn = document.getElementById('batch-save-btn');
+const classReportModal = document.getElementById('class-report-modal');
+const classReportExportSelect = document.getElementById('class-report-export-select');
+const classReportExportOptions = document.getElementById('class-report-export-options');
+const classReportGenerateBtn = document.getElementById('class-report-generate-btn');
+const classReportContent = document.getElementById('class-report-content');
+const classReportSections = document.getElementById('class-report-sections');
+const classReportDownloadBtn = document.getElementById('class-report-download-btn');
 
 const questionTypeSelect = document.getElementById('question-type-select');
 
@@ -120,15 +144,16 @@ const recommendationList = document.getElementById('recommendation-list');
 
 const imageUpload = document.getElementById('image-upload');
 const uploadBtn = document.getElementById('upload-btn');
+const imageClipboardBtn = document.getElementById('image-clipboard-btn');
 const imagePreview = document.getElementById('image-preview');
 
 const examUpload = document.getElementById('exam-upload');
 const examUploadBtn = document.getElementById('exam-upload-btn');
+const examClipboardBtn = document.getElementById('exam-clipboard-btn');
 const examPreview = document.getElementById('exam-preview');
 const parseExamBtn = document.getElementById('parse-exam-btn');
 const parsedQuestionsDiv = document.getElementById('parsed-questions');
 const parsedQuestionsList = document.getElementById('parsed-questions-list');
-const batchSaveBtn = document.getElementById('batch-save-btn');
 
 const logoutBtn = document.getElementById('logout-btn');
 const cartIcon = document.getElementById('cart-icon');
@@ -290,6 +315,9 @@ function setupEventListeners() {
         uploadBtn.addEventListener('click', () => imageUpload.click());
         imageUpload.addEventListener('change', handleImageUpload);
     }
+    if (imageClipboardBtn) {
+        imageClipboardBtn.addEventListener('click', handleQuestionClipboard);
+    }
 
     if (examUploadBtn && examUpload) {
         examUploadBtn.addEventListener('click', (e) => {
@@ -297,6 +325,9 @@ function setupEventListeners() {
             examUpload.click();
         });
         examUpload.addEventListener('change', handleExamUpload);
+    }
+    if (examClipboardBtn) {
+        examClipboardBtn.addEventListener('click', handleExamClipboard);
     }
     if (parseExamBtn) {
         parseExamBtn.addEventListener('click', handleParseExam);
@@ -330,10 +361,6 @@ function setupEventListeners() {
     const removeExamBtn = document.getElementById('remove-exam-btn');
     if (removeExamBtn) {
         removeExamBtn.addEventListener('click', removeExam);
-    }
-
-    if (batchSaveBtn) {
-        batchSaveBtn.addEventListener('click', handleBatchSave);
     }
 
     if (logoutBtn) {
@@ -386,6 +413,48 @@ function setupEventListeners() {
         reloadStudentsBtn.addEventListener('click', () => loadStudents(true));
     }
 
+    if (batchUploadBtn) {
+        batchUploadBtn.addEventListener('click', openBatchHomeworkModal);
+    }
+    if (batchUploadTrigger) {
+        batchUploadTrigger.addEventListener('click', () => batchFileInput?.click());
+    }
+    if (batchUploadZone) {
+        batchUploadZone.addEventListener('click', (e) => {
+            if (e.target === batchUploadZone || e.target.closest('.upload-icon') || e.target.tagName === 'H4' || e.target.tagName === 'P') {
+                batchFileInput?.click();
+            }
+        });
+    }
+    if (batchFileInput) {
+        batchFileInput.addEventListener('change', handleBatchFileChange);
+    }
+    if (batchParseBtn) {
+        batchParseBtn.addEventListener('click', handleBatchParse);
+    }
+    if (batchResultsTableWrapper) {
+        batchResultsTableWrapper.addEventListener('change', handleBatchMappingSelectChange);
+    }
+    if (batchHomeworkModal) {
+        attachModalBackdropHandler(batchHomeworkModal, () => closeModalElement(batchHomeworkModal));
+    }
+    if (batchSaveBtn) {
+        batchSaveBtn.addEventListener('click', handleBatchSave);
+    }
+
+    if (classReportBtn) {
+        classReportBtn.addEventListener('click', openClassReportModal);
+    }
+    if (classReportGenerateBtn) {
+        classReportGenerateBtn.addEventListener('click', handleClassReportGenerate);
+    }
+    if (classReportDownloadBtn) {
+        classReportDownloadBtn.addEventListener('click', handleClassReportDownload);
+    }
+    if (classReportModal) {
+        attachModalBackdropHandler(classReportModal, () => closeModalElement(classReportModal));
+    }
+
     if (studentsTableBody) {
         studentsTableBody.addEventListener('click', handleStudentActionClick);
     }
@@ -401,6 +470,9 @@ function setupEventListeners() {
     }
     if (homeworkUploadBtn) {
         homeworkUploadBtn.addEventListener('click', () => homeworkFileInput?.click());
+    }
+    if (homeworkClipboardBtn) {
+        homeworkClipboardBtn.addEventListener('click', handleHomeworkClipboard);
     }
     if (homeworkUploadZone) {
         homeworkUploadZone.addEventListener('click', (e) => {
@@ -838,7 +910,9 @@ function resetHomeworkState() {
         exportId: null,
         paperTitle: '',
         results: [],
-        raw: null
+        raw: null,
+        detectedStudentId: '',
+        detectedStudentName: ''
     };
 
     if (homeworkExportSelect) {
@@ -868,6 +942,10 @@ function resetHomeworkState() {
     }
     if (homeworkResultsList) {
         homeworkResultsList.innerHTML = '';
+    }
+    if (homeworkDetectedStudent) {
+        homeworkDetectedStudent.classList.add('hidden');
+        homeworkDetectedStudent.textContent = '';
     }
     if (homeworkSaveBtn) {
         homeworkSaveBtn.disabled = true;
@@ -928,6 +1006,40 @@ function initCustomSelects() {
         }
     }
 
+    if (batchExportSelect) {
+        const trigger = batchExportSelect.querySelector('.custom-select-trigger');
+        if (trigger) {
+            trigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isActive = trigger.classList.contains('active');
+                closeAllCustomSelects();
+                if (!isActive && !trigger.classList.contains('disabled')) {
+                    trigger.classList.add('active');
+                    if (batchExportOptions) {
+                        batchExportOptions.classList.add('show');
+                    }
+                }
+            });
+        }
+    }
+
+    if (classReportExportSelect) {
+        const trigger = classReportExportSelect.querySelector('.custom-select-trigger');
+        if (trigger) {
+            trigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isActive = trigger.classList.contains('active');
+                closeAllCustomSelects();
+                if (!isActive && !trigger.classList.contains('disabled')) {
+                    trigger.classList.add('active');
+                    if (classReportExportOptions) {
+                        classReportExportOptions.classList.add('show');
+                    }
+                }
+            });
+        }
+    }
+
     document.addEventListener('click', (e) => {
         if (!e.target.closest('.custom-select')) {
             closeAllCustomSelects();
@@ -977,6 +1089,99 @@ function getScoreColor(score) {
     const end = [31, 132, 89];
     const rgb = start.map((value, index) => Math.round(value + (end[index] - value) * clamped));
     return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+}
+
+async function readClipboardImageFile() {
+    if (!navigator.clipboard || typeof navigator.clipboard.read !== 'function') {
+        showMessage('当前浏览器不支持从剪贴板读取图片，请使用常规上传方式。', 'warning');
+        return null;
+    }
+    try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+            const types = item.types || [];
+            const imageType = types.find((type) => type === 'image/png' || type === 'image/jpeg' || type === 'image/jpg');
+            if (!imageType) {
+                continue;
+            }
+            const blob = await item.getType(imageType);
+            const extension = imageType === 'image/png' ? 'png' : 'jpg';
+            const filename = `clipboard-${Date.now()}.${extension}`;
+            return new File([blob], filename, { type: imageType });
+        }
+        showMessage('剪贴板中未检测到图片，请先使用截屏工具复制图片后再试。', 'warning');
+    } catch (error) {
+        if (error?.name === 'NotAllowedError') {
+            showMessage('读取剪贴板失败：请允许浏览器访问剪贴板或手动上传文件。', 'error');
+        } else {
+            showMessage('读取剪贴板图片失败: ' + error.message, 'error');
+        }
+    }
+    return null;
+}
+
+function createFileListFromFile(file) {
+    if (typeof DataTransfer !== 'undefined') {
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        return dataTransfer.files;
+    }
+    return {
+        length: 1,
+        0: file,
+        item: () => file,
+        [Symbol.iterator]: function* () {
+            yield file;
+        },
+    };
+}
+
+async function handleExamClipboard() {
+    const clipboardFile = await readClipboardImageFile();
+    if (!clipboardFile) {
+        return;
+    }
+    const files = createFileListFromFile(clipboardFile);
+    if (examUpload) {
+        examUpload.files = files;
+    }
+    const handler = window.handleExamUpload;
+    if (typeof handler === 'function') {
+        handler({ target: { files } });
+    } else {
+        showMessage('无法处理剪贴板图片，请稍后重试。', 'error');
+    }
+}
+
+async function handleHomeworkClipboard() {
+    const clipboardFile = await readClipboardImageFile();
+    if (!clipboardFile) {
+        return;
+    }
+    const files = createFileListFromFile(clipboardFile);
+    if (homeworkFileInput) {
+        homeworkFileInput.files = files;
+    }
+    const handler = window.handleHomeworkFileUpload;
+    if (typeof handler === 'function') {
+        handler({ target: { files } });
+    } else {
+        showMessage('无法处理剪贴板图片，请稍后重试。', 'error');
+    }
+}
+
+async function handleQuestionClipboard() {
+    const clipboardFile = await readClipboardImageFile();
+    if (!clipboardFile) {
+        return;
+    }
+    const files = createFileListFromFile(clipboardFile);
+    const handler = window.handleImageUpload;
+    if (typeof handler === 'function') {
+        handler({ target: { files } });
+    } else {
+        showMessage('无法处理剪贴板图片，请稍后重试。', 'error');
+    }
 }
 
 // 将部分函数暴露到全局以供其他脚本使用

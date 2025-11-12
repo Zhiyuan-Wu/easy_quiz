@@ -9,7 +9,7 @@ import uuid
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
@@ -626,6 +626,57 @@ class StudentManager:
         finally:
             conn.close()
 
+    def get_homework_results_by_export(
+        self,
+        export_id: int,
+        user_id: Optional[int] = None,
+    ) -> List[Dict]:
+        """获取指定导出试卷的所有作业批改结果。
+
+        参数:
+            export_id: 试卷导出记录 ID。
+            user_id: 当前用户 ID，用于关联学生名册，可选。
+
+        返回:
+            作业批改结果字典列表。
+        """
+        conn = self._homework_conn()
+        try:
+            if user_id is None:
+                rows = conn.execute(
+                    """
+                    SELECT hr.*, NULL AS roster_name
+                    FROM homework_results AS hr
+                    WHERE hr.export_id = ?
+                    ORDER BY hr.student_id ASC, hr.id ASC
+                    """,
+                    (export_id,),
+                ).fetchall()
+            else:
+                # 附加 students 数据库以支持跨数据库 JOIN
+                # 使用绝对路径确保 ATTACH 正常工作
+                student_db_abs_path = os.path.abspath(STUDENT_DATABASE_PATH)
+                # SQLite 的 ATTACH DATABASE 不支持参数化查询，需要转义单引号
+                escaped_path = student_db_abs_path.replace("'", "''")
+                conn.execute(f"ATTACH DATABASE '{escaped_path}' AS student_db")
+                try:
+                    rows = conn.execute(
+                        """
+                        SELECT hr.*, s.name AS roster_name
+                        FROM homework_results AS hr
+                        LEFT JOIN student_db.students AS s
+                            ON hr.student_id = s.student_id AND s.user_id = ?
+                        WHERE hr.export_id = ?
+                        ORDER BY hr.student_id ASC, hr.id ASC
+                        """,
+                        (user_id, export_id),
+                    ).fetchall()
+                finally:
+                    conn.execute("DETACH DATABASE student_db")
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
     # ------------------------------------------------------------------
     # 报告缓存
     # ------------------------------------------------------------------
@@ -716,6 +767,7 @@ class StudentManager:
         paper_title: str,
         questions: List[Dict],
         ocr_text: str,
+        roster: Optional[List[Dict]],
     ) -> str:
         """生成用于作业批改的提示词。
 
@@ -723,6 +775,7 @@ class StudentManager:
             paper_title: 试卷标题。
             questions: 试卷题目列表。
             ocr_text: 学生作业的 OCR 文本。
+            roster: 学生名册列表。
 
         返回:
             构造好的提示词字符串。
@@ -740,12 +793,27 @@ class StudentManager:
             ensure_ascii=False,
         )
 
+        roster_payload = json.dumps(
+            [
+                {
+                    "student_id": item.get("student_id", ""),
+                    "name": item.get("name", ""),
+                }
+                for item in (roster or [])
+                if isinstance(item, dict)
+            ],
+            ensure_ascii=False,
+        )
+
         prompt = f"""
 你是一名严格的数学阅卷教师。请根据以下原始试卷题目，与学生手写作业的OCR识别文本进行匹配和批改。
 
 试卷标题：{paper_title}
 原始试卷题目与编号（JSON数组）：
 {question_block}
+
+学生名册（JSON数组，字段包含student_id与name）：
+{roster_payload}
 
 学生作业OCR文本：
 {ocr_text}
@@ -755,8 +823,12 @@ class StudentManager:
 2. 对于未匹配到的题目，请将学生解答设为""空字符串，并将得分设为0。
 3. 得分区间为0到1，可保留两位小数；0表示完全错误，1表示完全正确，可给出介于0到1之间的分值。
 4. feedback字段用于指出学生不理解的知识点或建议，若完全正确可为空字符串。
-5. 返回格式必须是JSON，结构如下：
+5. 请识别该份作业对应的学生学号和姓名，优先根据上方学生名册匹配；若无法确认则将学号填写为空字符串""。
+6. 学生作答文本需要清理OCR噪声，移除异常字符、重复噪声、乱码等，但必须保留学生作答的原始含义和关键步骤。
+7. 返回格式必须是JSON，结构如下：
 {{
+    "detected_student_id": "学号或空字符串",
+    "detected_student_name": "姓名或空字符串",
     "results": [
         {{
             "question_id": 原题数据库ID,
@@ -777,18 +849,35 @@ class StudentManager:
         paper_title: str,
         questions: List[Dict],
         ocr_text: str,
-    ) -> List[Dict]:
+        user_id: Optional[int],
+    ) -> Dict[str, Any]:
         """调用大模型批改作业并返回结构化结果。
 
         参数:
             paper_title: 试卷标题。
             questions: 试卷题目列表。
             ocr_text: OCR 识别出的学生作业文本。
+            user_id: 当前用户ID，用于获取学生名册。
 
         返回:
-            批改结果字典列表。
+            包含识别学生信息与批改结果的字典。
         """
-        prompt = self.build_homework_prompt(paper_title, questions, ocr_text)
+        roster: List[Dict] = []
+        if user_id is not None:
+            try:
+                roster = [
+                    {
+                        "student_id": student.get("student_id", ""),
+                        "name": student.get("name", ""),
+                    }
+                    for student in self.list_students(user_id)
+                    if isinstance(student, dict)
+                ]
+            except Exception as roster_exc:
+                self.logger.log_error(roster_exc, "获取学生名册失败")
+                roster = []
+
+        prompt = self.build_homework_prompt(paper_title, questions, ocr_text, roster)
         self.logger.log_llm_prompt(prompt, "作业批改")
 
         response = self.llm_client.chat.completions.create(
@@ -802,9 +891,26 @@ class StudentManager:
             outer_json = _extract_outermost_json_block(content)
             payload = repair_json(outer_json)
             data = json.loads(payload)
-            if not isinstance(data, dict) or "results" not in data:
+            if not isinstance(data, dict):
                 raise ValueError("LLM返回格式不正确")
-            return data["results"]
+
+            detected_student_id = data.get("detected_student_id") or data.get("student_id") or ""
+            detected_student_name = data.get("detected_student_name") or data.get("student_name") or ""
+
+            if not isinstance(detected_student_id, str):
+                detected_student_id = str(detected_student_id)
+            if not isinstance(detected_student_name, str):
+                detected_student_name = str(detected_student_name)
+
+            results = data.get("results")
+            if not isinstance(results, list):
+                raise ValueError("LLM返回格式缺少results数组")
+
+            return {
+                "detected_student_id": detected_student_id.strip(),
+                "detected_student_name": detected_student_name.strip(),
+                "results": [item for item in results if isinstance(item, dict)],
+            }
         except Exception as exc:
             self.logger.log_error(exc, "解析作业批改结果失败")
             raise ValueError("作业批改失败，请稍后重试") from exc
