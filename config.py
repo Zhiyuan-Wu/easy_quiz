@@ -3,6 +3,8 @@
 高考题目录入和自动打标系统配置文件
 """
 
+import os
+
 # 数据库配置
 DATABASE_PATH = "question_database.db"
 SYSTEM_DATABASE_PATH = "system.db"
@@ -53,7 +55,7 @@ MAX_QUESTION_LENGTH = 10000  # 题目最大长度
 MAX_ANSWER_LENGTH = 5000     # 答案最大长度
 
 # OCR服务配置
-OCR_BASE_URL = "http://192.168.31.65:5000"
+OCR_BASE_URL = os.environ.get("OCR_BASE_URL", "http://127.0.0.1:5000")
 
 # Embedding服务配置
 EMBEDDING_CONFIG = {
@@ -66,7 +68,7 @@ EMBEDDING_CACHE_DB_PATH = "data/embeddings_cache.db"
 
 # LaTeX编译服务配置
 LATEX_COMPILE_CONFIG = {
-    "api_url": "http://192.168.31.65:5000/compile-latex",
+    "api_url": os.environ.get("LATEX_SERVICE_URL", "http://127.0.0.1:5100/compile-latex"),
     "compile_recipe": [
         ["xelatex", "-output-directory", "{output_dir}", "-interaction=nonstopmode", "{tex_file}"],
         ["xelatex", "-output-directory", "{output_dir}", "-interaction=nonstopmode", "{tex_file}"]
