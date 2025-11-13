@@ -38,10 +38,30 @@ app = FastAPI(
 
 
 async def _compile_latex(payload: CompileRequest) -> Dict[str, str]:
+    """Compile LaTeX content on a worker thread.
+
+    Parameters:
+        payload: Validated request body describing the LaTeX source,
+            optional dependencies and compilation recipe.
+
+    Returns:
+        包含 `success` 字段和可选 `pdf_base64` 字段的结果字典。
+    """
     return await anyio.to_thread.run_sync(_compile_latex_sync, payload, limiter=None)
 
 
 def _compile_latex_sync(payload: CompileRequest) -> Dict[str, str]:
+    """Compile LaTeX synchronously inside a temporary directory.
+
+    Parameters:
+        payload: Validated compile request数据对象。
+
+    Returns:
+        包含成功标志和 PDF Base64 内容的响应字典。
+
+    Raises:
+        HTTPException: 当输入非法或编译失败时抛出。
+    """
     if not payload.latex_content.strip():
         raise HTTPException(status_code=400, detail="latex_content is required")
 
@@ -121,14 +141,22 @@ def _compile_latex_sync(payload: CompileRequest) -> Dict[str, str]:
 async def compile_latex_endpoint(payload: CompileRequest) -> Dict[str, str]:
     """
     将 LaTeX 内容编译成 PDF。
+
+    Parameters:
+        payload: 包含 LaTeX 源文件、依赖及可选编译流程的请求体。
+
+    Returns:
+        编译结果的 JSON 字典，其中成功时包含 `pdf_base64`。
     """
     return await _compile_latex(payload)
 
 
 @app.get("/healthz")
 async def healthz() -> Dict[str, str]:
-    """
-    健康检查端点。
+    """健康检查端点。
+
+    Returns:
+        字典形式的健康状态信息。
     """
     return {"status": "ok"}
 

@@ -39,6 +39,15 @@ RESULT_BASE.mkdir(exist_ok=True)
 
 
 def _load_cached_result(request_dir: Path, raw_mode: bool) -> Optional[Dict[str, object]]:
+    """Load cached OCR results if present on disk.
+
+    Parameters:
+        request_dir: 该请求对应的缓存目录。
+        raw_mode: 是否以原始文本模式返回。
+
+    Returns:
+        包含 Markdown/图片或 raw_text 的结果字典；若无缓存则返回 None。
+    """
     mmd_file = request_dir / "result.mmd"
     if not mmd_file.exists():
         return None
@@ -71,6 +80,18 @@ def _load_cached_result(request_dir: Path, raw_mode: bool) -> Optional[Dict[str,
 
 
 def _run_inference(input_image_path: Path, request_dir: Path) -> str:
+    """Run model inference and persist outputs for subsequent reads.
+
+    Parameters:
+        input_image_path: 输入图像在磁盘上的路径。
+        request_dir: 推理结果保存的目录。
+
+    Returns:
+        生成的 Markdown 文本内容。
+
+    Raises:
+        RuntimeError: 当推理未生成结果文件时抛出。
+    """
     prompt = "<image>\n<|grounding|>Convert the document to markdown."
 
     model.infer(
@@ -107,12 +128,17 @@ async def ocr_endpoint(
     file: UploadFile = File(...),
     mode: str = "processed",
 ) -> Dict[str, object]:
-    """
-    处理图片上传，执行 OCR 并返回结果。
+    """处理图片上传，执行 OCR 并返回结果。
 
-    mode:
-        - processed: 返回 markdown + image patches（旧模式）
-        - raw: 返回原始模型输出，由客户端处理
+    Parameters:
+        file: 前端上传的图像文件。
+        mode: 返回模式，可选 `processed` 或 `raw`。
+
+    Returns:
+        包含 Markdown 内容或原始文本与图片数据的结果字典。
+
+    Raises:
+        HTTPException: 当出现无效输入或推理失败时抛出。
     """
     filename = file.filename or ""
     if not filename.lower().endswith((".png", ".jpg", ".jpeg")):

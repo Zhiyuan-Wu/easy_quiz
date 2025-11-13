@@ -100,10 +100,29 @@ ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "bmp", "pdf"}
 
 
 def allowed_file(filename: str) -> bool:
+    """Return True if the uploaded filename uses an allowed extension.
+
+    Parameters:
+        filename: 用户上传的原始文件名。
+
+    Returns:
+        当扩展名满足要求时返回 True，否则返回 False。
+    """
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 async def require_login(request: Request) -> int:
+    """FastAPI dependency that enforces an authenticated session.
+
+    Parameters:
+        request: 当前请求对象。
+
+    Returns:
+        已认证用户的整型 ID。
+
+    Raises:
+        HTTPException: 当用户未登录或 session 缺失时抛出 401。
+    """
     user_id = request.session.get("user_id")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
@@ -111,6 +130,14 @@ async def require_login(request: Request) -> int:
 
 
 def parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse an ISO formatted string into a datetime object.
+
+    Parameters:
+        value: ISO 字符串或 None。
+
+    Returns:
+        转换后的 datetime；当解析失败或为空时返回 None。
+    """
     if not value:
         return None
     try:
@@ -120,6 +147,14 @@ def parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
 
 
 def serialize_student(student_row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Convert a student database row into an API friendly structure。
+
+    Parameters:
+        student_row: 原始数据库行字典。
+
+    Returns:
+        序列化后的学生字典；如果输入为空则返回 None。
+    """
     if not student_row:
         return None
     avg = student_row.get("cached_average_score")
@@ -135,6 +170,14 @@ def serialize_student(student_row: Optional[Dict[str, Any]]) -> Optional[Dict[st
 
 
 def serialize_history_item(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Convert a homework history row into JSON serializable data。
+
+    Parameters:
+        row: 作业历史记录行。
+
+    Returns:
+        标准化的历史记录字典；若输入为空返回 None。
+    """
     if not row:
         return None
     score = row.get("score")
@@ -157,6 +200,14 @@ def serialize_history_item(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
 
 
 def collect_history_for_report(student_id: str):
+    """Collect homework records needed for building a learning report。
+
+    Parameters:
+        student_id: 学生编号。
+
+    Returns:
+        包含全部记录、截断列表以及最新时间戳的三元组。
+    """
     history_records = student_manager.get_homework_history(
         student_id,
         window_days=ANALYTICS_WINDOW_DAYS,
@@ -188,6 +239,17 @@ def collect_history_for_report(student_id: str):
 
 
 def generate_report_for_student(student: Dict[str, Any]):
+    """Generate a learning report for the specified student。
+
+    Parameters:
+        student: 学生信息字典。
+
+    Returns:
+        由报告、用于展示的历史记录和最新时间戳组成的三元组。
+
+    Raises:
+        ValueError: 在缺少历史记录时抛出。
+    """
     _, history_for_report, latest_ts = collect_history_for_report(student["student_id"])
     if not history_for_report:
         raise ValueError("暂无做题历史，无法生成报告")
@@ -198,6 +260,13 @@ def generate_report_for_student(student: Dict[str, Any]):
 
 
 def log_error_with_details(exc: Exception, context: str, **kwargs) -> None:
+    """Log detailed error information with contextual metadata。
+
+    Parameters:
+        exc: 捕获的异常。
+        context: 错误发生的上下文描述。
+        **kwargs: 额外的调试信息。
+    """
     traceback_str = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     error_details = {
         "context": context,
@@ -217,23 +286,50 @@ def log_error_with_details(exc: Exception, context: str, **kwargs) -> None:
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request, user_id: int = Depends(require_login)):
+    """Render the main dashboard page for authenticated users.
+
+    Parameters:
+        request: 当前请求对象。
+        user_id: FastAPI 依赖注入的已登录用户 ID。
+
+    Returns:
+        渲染后的首页模板响应。
+    """
     user = await run_in_threadpool(system_manager.get_user_by_id, user_id)
     return templates.TemplateResponse("index.html", {"request": request, "user": user})
 
 
 @app.get("/profile", response_class=HTMLResponse)
 async def profile(request: Request, user_id: int = Depends(require_login)):
+    """Render the personal profile page.
+
+    Parameters:
+        request: 当前请求对象。
+        user_id: 已登录用户 ID。
+
+    Returns:
+        用户中心模板响应。
+    """
     user = await run_in_threadpool(system_manager.get_user_by_id, user_id)
     return templates.TemplateResponse("user_profile.html", {"request": request, "user": user})
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
+    """Render the login page."""
     return templates.TemplateResponse("login.html", {"request": request})
 
 
 @app.post("/api/auth/register")
 async def register(payload: Dict[str, Any]):
+    """Register a new user account.
+
+    Parameters:
+        payload: 包含用户名、密码、邮箱的请求体。
+
+    Returns:
+        注册结果字典。
+    """
     try:
         username = payload.get("username")
         password = payload.get("password")
@@ -247,6 +343,15 @@ async def register(payload: Dict[str, Any]):
 
 @app.post("/api/auth/login")
 async def login(request: Request, payload: Dict[str, Any]):
+    """Authenticate a user and persist the session.
+
+    Parameters:
+        request: 当前请求对象（用于写入 session）。
+        payload: 包含用户名与密码的 JSON。
+
+    Returns:
+        登录成功/失败信息以及用户数据。
+    """
     try:
         username = payload.get("username")
         password = payload.get("password")
@@ -263,12 +368,23 @@ async def login(request: Request, payload: Dict[str, Any]):
 
 @app.post("/api/auth/logout")
 async def logout(request: Request):
+    """Clear the current user session."""
     request.session.clear()
+    # 仅返回成功标记
     return {"success": True, "message": "已登出"}
 
 
 @app.get("/api/auth/current")
 async def get_current_user(request: Request, user_id: int = Depends(require_login)):
+    """Retrieve the active user's information.
+
+    Parameters:
+        request: 当前请求对象，用于处理失效 session。
+        user_id: 经过验证的用户 ID。
+
+    Returns:
+        包含用户信息的字典。
+    """
     user = await run_in_threadpool(system_manager.get_user_by_id, user_id)
     if user:
         return {"success": True, "user": user}
@@ -278,6 +394,14 @@ async def get_current_user(request: Request, user_id: int = Depends(require_logi
 
 @app.get("/api/students")
 async def list_students(user_id: int = Depends(require_login)):
+    """List students belonging to the current user.
+
+    Parameters:
+        user_id: 当前登录用户 ID。
+
+    Returns:
+        包含学生列表的响应字典。
+    """
     try:
         students = await run_in_threadpool(student_manager.list_students, user_id)
         payload = [serialized for stu in students if (serialized := serialize_student(stu))]
@@ -292,6 +416,15 @@ async def add_student_api(
     payload: Dict[str, Any],
     user_id: int = Depends(require_login),
 ):
+    """Create a new student record for the current user.
+
+    Parameters:
+        payload: 提供学号与姓名的 JSON。
+        user_id: 当前用户 ID。
+
+    Returns:
+        新增学生信息的响应字典。
+    """
     student_id = (payload.get("student_id") or "").strip()
     name = (payload.get("name") or "").strip()
     if not student_id or not name:
@@ -314,6 +447,17 @@ async def get_student_history(
     limit: Optional[int] = Query(None),
     window_days: int = Query(ANALYTICS_WINDOW_DAYS),
 ):
+    """Return homework history for a specific student.
+
+    Parameters:
+        student_id: 学生编号。
+        user_id: 所属用户 ID。
+        limit: 返回条数上限。
+        window_days: 时间窗口。
+
+    Returns:
+        包含历史数组的响应字典。
+    """
     try:
         history_rows = await run_in_threadpool(
             student_manager.get_homework_history,
@@ -344,6 +488,19 @@ async def parse_student_homework(
     student_name: str = Form(""),
     user_id: int = Depends(require_login),
 ):
+    """Parse a single homework submission and return grading results.
+
+    Parameters:
+        request: 当前请求对象。
+        student_id: 学生编号。
+        file: 上传的作业图片或 PDF。
+        export_id: 关联的试卷 ID。
+        student_name: 学生姓名，必要时补全。
+        user_id: 当前用户 ID。
+
+    Returns:
+        包含解析结果和学生信息的响应字典。
+    """
     if not allowed_file(file.filename or ""):
         raise HTTPException(status_code=400, detail="文件格式不支持")
 
@@ -411,6 +568,19 @@ async def batch_parse_homework(
     files: List[UploadFile] = File(...),
     user_id: int = Depends(require_login),
 ):
+    """Batch parse multiple homework files in a single request.
+
+    Parameters:
+        request: 当前请求对象。
+        export_id: 试卷 ID。
+        force_student_id: 强制指定的学生编号。
+        force_student_name: 强制指定的学生姓名。
+        files: 上传的文件列表。
+        user_id: 用户 ID。
+
+    Returns:
+        包含解析映射与失败列表的响应字典。
+    """
     entries: List[HomeworkFileEntry] = []
     pre_failures: List[Dict[str, Any]] = []
     os.makedirs(HOMEWORK_UPLOAD_DIR, exist_ok=True)
@@ -479,6 +649,15 @@ async def batch_parse_homework(
 
 @app.post("/api/students/homework/batch-save")
 async def batch_save_homework(payload: Dict[str, Any], user_id: int = Depends(require_login)):
+    """Persist multiple homework grading results in one call.
+
+    Parameters:
+        payload: 包含批量成绩的 JSON。
+        user_id: 当前用户 ID。
+
+    Returns:
+        成功与跳过列表。
+    """
     export_id_raw = payload.get("export_id")
     entries = payload.get("students") or []
     paper_title = payload.get("paper_title") or ""
@@ -559,6 +738,15 @@ async def batch_save_homework(payload: Dict[str, Any], user_id: int = Depends(re
 
 @app.post("/api/students/class-report")
 async def generate_class_report(payload: Dict[str, Any], user_id: int = Depends(require_login)):
+    """Generate aggregate analytics for a class report.
+
+    Parameters:
+        payload: 请求体包含导出 ID。
+        user_id: 当前用户 ID。
+
+    Returns:
+        报告统计数据的响应字典。
+    """
     export_id_raw = payload.get("export_id")
     if not export_id_raw:
         raise HTTPException(status_code=400, detail="缺少试卷信息")
@@ -584,6 +772,15 @@ async def generate_class_report(payload: Dict[str, Any], user_id: int = Depends(
 
 @app.post("/api/students/class-report/download")
 async def download_class_report(payload: Dict[str, Any], user_id: int = Depends(require_login)):
+    """Generate a PDF version of the class report for download.
+
+    Parameters:
+        payload: 请求体包含导出 ID。
+        user_id: 当前用户 ID。
+
+    Returns:
+        包含 PDF Base64 数据的字典。
+    """
     export_id_raw = payload.get("export_id")
     if not export_id_raw:
         raise HTTPException(status_code=400, detail="缺少试卷信息")
@@ -606,6 +803,16 @@ async def save_student_homework(
     payload: Dict[str, Any],
     user_id: int = Depends(require_login),
 ):
+    """Persist grading results for a single student.
+
+    Parameters:
+        student_id: 学生编号。
+        payload: 请求体含题目结果信息。
+        user_id: 当前用户 ID。
+
+    Returns:
+        包含 session UID 与更新后学生信息的字典。
+    """
     export_id_value = payload.get("export_id")
     student_name = (payload.get("student_name") or "").strip()
     results = payload.get("results") or []
@@ -672,6 +879,16 @@ async def get_student_report(
     refresh: bool = Query(False),
     user_id: int = Depends(require_login),
 ):
+    """Retrieve or regenerate a student's learning report.
+
+    Parameters:
+        student_id: 学生编号。
+        refresh: 是否强制刷新。
+        user_id: 当前用户 ID。
+
+    Returns:
+        包含报告内容及历史预览的响应字典。
+    """
     try:
         student = await run_in_threadpool(student_manager.get_student, student_id, user_id)
         if not student:
@@ -711,6 +928,15 @@ async def get_student_recommendations(
     student_id: str,
     user_id: int = Depends(require_login),
 ):
+    """Generate question recommendations for a student.
+
+    Parameters:
+        student_id: 学生编号。
+        user_id: 当前登录用户 ID。
+
+    Returns:
+        推荐题目列表。
+    """
     try:
         student = await run_in_threadpool(student_manager.get_student, student_id, user_id)
         if not student:
@@ -732,6 +958,15 @@ async def add_question(
     payload: Dict[str, Any],
     user_id: int = Depends(require_login),
 ):
+    """Insert a new question into the database.
+
+    Parameters:
+        payload: 包含题目内容、标签等信息的 JSON。
+        user_id: 当前用户 ID。
+
+    Returns:
+        包含新增题目 ID 的响应字典。
+    """
     if not payload or "latex_content" not in payload:
         raise HTTPException(status_code=400, detail="题目内容不能为空")
     latex_content = payload["latex_content"]
@@ -771,6 +1006,16 @@ async def update_question(
     payload: Dict[str, Any],
     user_id: int = Depends(require_login),
 ):
+    """Update question content, answer, or type.
+
+    Parameters:
+        question_id: 题目 ID。
+        payload: 更新数据 JSON。
+        user_id: 当前用户 ID。
+
+    Returns:
+        更新后的题目信息。
+    """
     latex_content = (payload.get("latex_content") or "").strip()
     reference_answer = payload.get("reference_answer", "")
     question_type = payload.get("question_type")
@@ -809,6 +1054,15 @@ async def auto_tag_question(
     payload: Dict[str, Any],
     user_id: int = Depends(require_login),
 ):
+    """Automatically tag and answer a question using the LLM.
+
+    Parameters:
+        payload: 请求体包含题目原文。
+        user_id: 当前用户 ID。
+
+    Returns:
+        由标签、答案和 LaTeX 文本组成的字典。
+    """
     if not payload or "content" not in payload:
         raise HTTPException(status_code=400, detail="题目内容不能为空")
     content = payload["content"]
@@ -849,6 +1103,18 @@ async def search_questions(
     limit: int = Query(20, ge=1, le=200),
     user_id: int = Depends(require_login),
 ):
+    """Search or list questions with optional filtering.
+
+    Parameters:
+        tags: 按标签过滤。
+        keyword: 关键词搜索。
+        page: 页码。
+        limit: 每页数量。
+        user_id: 当前用户 ID。
+
+    Returns:
+        题目列表以及数量。
+    """
     try:
         offset = (page - 1) * limit
         if tags:
@@ -875,6 +1141,15 @@ async def get_question(
     question_id: int,
     user_id: int = Depends(require_login),
 ):
+    """Fetch a single question by ID with permission checks.
+
+    Parameters:
+        question_id: 题目 ID。
+        user_id: 当前用户 ID。
+
+    Returns:
+        包含题目详情的字典。
+    """
     try:
         question = await run_in_threadpool(question_manager.get_question_by_id, question_id, user_id)
         if question:
@@ -893,6 +1168,16 @@ async def generate_question_variant(
     payload: Dict[str, Any],
     user_id: int = Depends(require_login),
 ):
+    """Ask the LLM to generate a variant based on an existing question.
+
+    Parameters:
+        question_id: 原题 ID。
+        payload: 可选的覆盖内容。
+        user_id: 当前用户 ID。
+
+    Returns:
+        变体题目的字段。
+    """
     try:
         base_question = await run_in_threadpool(question_manager.get_question_by_id, question_id, user_id)
         if not base_question:
@@ -920,6 +1205,7 @@ async def generate_question_variant(
 
 @app.get("/api/questions/stats")
 async def get_question_stats(user_id: int = Depends(require_login)):
+    """Return question statistics for the current user."""
     try:
         stats = await run_in_threadpool(question_manager.get_question_stats, user_id)
         return {"success": True, "stats": stats}
@@ -933,6 +1219,7 @@ async def upload_file(
     file: UploadFile = File(...),
     user_id: int = Depends(require_login),
 ):
+    """Handle generic media upload and return a public URL."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="没有选择文件")
     if not allowed_file(file.filename):
@@ -950,6 +1237,7 @@ async def delete_question(
     question_id: int,
     user_id: int = Depends(require_login),
 ):
+    """Delete a question if the current user is the owner."""
     try:
         success = await run_in_threadpool(question_manager.delete_question, question_id, user_id)
         if success:
@@ -967,6 +1255,7 @@ async def pdf_preview(
     file: UploadFile = File(...),
     user_id: int = Depends(require_login),
 ):
+    """Generate a preview image for the first page of a PDF."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="没有选择文件")
     if not file.filename.lower().endswith(".pdf"):
@@ -996,6 +1285,7 @@ async def ocr_parse(
     mode: str = Form("processed"),
     user_id: int = Depends(require_login),
 ):
+    """Run OCR on an uploaded exam and parse questions."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="没有选择文件")
     if not allowed_file(file.filename):
@@ -1072,6 +1362,7 @@ async def ocr_parse(
 
 @app.get("/api/tags")
 async def get_tags():
+    """Return a list of system tags."""
     try:
         tags = await run_in_threadpool(system_manager.get_all_tags, 20)
         tag_names = [tag["name"] for tag in tags]
@@ -1086,6 +1377,7 @@ async def export_paper(
     payload: Dict[str, Any],
     user_id: int = Depends(require_login),
 ):
+    """Export selected questions into LaTeX, DOCX, or PDF."""
     questions = payload.get("questions", [])
     title = payload.get("title", "数学试卷")
     mode = payload.get("mode", "questions")
@@ -1138,6 +1430,7 @@ async def export_paper(
 
 @app.get("/api/user/exports")
 async def get_user_exports(user_id: int = Depends(require_login)):
+    """Return recent export history for the current user."""
     try:
         exports = await run_in_threadpool(system_manager.get_export_history, user_id, 50)
         return {"success": True, "exports": exports}
@@ -1151,6 +1444,7 @@ async def reset_password(
     payload: Dict[str, Any],
     user_id: int = Depends(require_login),
 ):
+    """Allow a user to update their password."""
     old_password = payload.get("old_password")
     new_password = payload.get("new_password")
     try:
@@ -1166,6 +1460,7 @@ async def get_re_export_data(
     export_id: int,
     user_id: int = Depends(require_login),
 ):
+    """Fetch metadata required to re-export a previous paper."""
     try:
         export_data = await run_in_threadpool(system_manager.get_export_by_id, export_id)
         if not export_data or export_data["user_id"] != user_id:
@@ -1185,11 +1480,13 @@ async def get_re_export_data(
 
 @app.exception_handler(404)
 async def not_found(request: Request, exc: HTTPException):  # pragma: no cover - fallback
+    """Handle 404 errors with a consistent JSON payload."""
     return JSONResponse({"success": False, "message": "页面不存在"}, status_code=404)
 
 
 @app.exception_handler(500)
 async def internal_error(request: Request, exc: HTTPException):  # pragma: no cover - fallback
+    """Handle uncaught server errors."""
     return JSONResponse({"success": False, "message": "服务器内部错误"}, status_code=500)
 
 

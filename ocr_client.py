@@ -25,6 +25,14 @@ RAW_STOP_TOKEN = "<｜end▁of▁sentence｜>"
 
 
 def _clean_raw_text(raw_text: str) -> str:
+    """Normalize raw model output by trimming control tokens and whitespace.
+
+    Parameters:
+        raw_text: 原始的模型响应文本。
+
+    Returns:
+        去除停用符号并裁剪后的文本内容。
+    """
     if not raw_text:
         return ""
     text = raw_text.strip()
@@ -34,6 +42,14 @@ def _clean_raw_text(raw_text: str) -> str:
 
 
 def _parse_detection(det_text: str) -> List[Tuple[float, float, float, float]]:
+    """Parse detection tokens into bounding box tuples.
+
+    Parameters:
+        det_text: 包含坐标信息的 JSON 或列表字符串。
+
+    Returns:
+        归一化坐标的列表，格式为 (x1, y1, x2, y2)。
+    """
     try:
         parsed = json.loads(det_text)
     except json.JSONDecodeError:
@@ -55,6 +71,16 @@ def _scale_box(
     image_width: int,
     image_height: int,
 ) -> Tuple[int, int, int, int]:
+    """Scale normalized coordinates to pixel positions.
+
+    Parameters:
+        box: 归一化的左上角和右下角坐标。
+        image_width: 图像宽度（像素）。
+        image_height: 图像高度（像素）。
+
+    Returns:
+        对应的整数像素坐标 (x1, y1, x2, y2)。
+    """
     x1, y1, x2, y2 = box
     x1 = int(max(0, min(image_width, round(x1 / 999 * image_width))))
     y1 = int(max(0, min(image_height, round(y1 / 999 * image_height))))
@@ -69,6 +95,14 @@ def _scale_box(
 
 
 def _collect_annotations(raw_text: str) -> List[Dict[str, Any]]:
+    """Collect control annotations from raw text output.
+
+    Parameters:
+        raw_text: 包含控制标记的模型输出。
+
+    Returns:
+        解析后的注释列表，每项包含标签、坐标和原始文本。
+    """
     annotations: List[Dict[str, Any]] = []
     for match in RAW_MATCH_PATTERN.finditer(raw_text):
         label = match.group("label").strip()
@@ -90,6 +124,16 @@ def _crop_images_from_annotations(
     *,
     output_dir: Optional[Path] = None,
 ) -> Tuple[List[Dict[str, str]], Dict[str, str]]:
+    """Crop image regions referenced by annotations.
+
+    Parameters:
+        image_path: 原始图像路径。
+        annotations: 控制标签解析结果。
+        output_dir: 可选的输出目录，用于保存裁剪图像。
+
+    Returns:
+        Tuple，其中包含编码后的裁剪图像列表以及替换引用的映射字典。
+    """
     with Image.open(image_path) as image:
         image = image.convert("RGB")
         width, height = image.size
@@ -133,6 +177,16 @@ def _crop_images_from_annotations(
 
 
 def _purge_control_tokens(raw_text: str, annotations: List[Dict[str, Any]], replacements: Dict[str, str]) -> str:
+    """Remove control tokens and apply replacements to produce Markdown text.
+
+    Parameters:
+        raw_text: 原始模型输出。
+        annotations: 解析的注释列表。
+        replacements: 需要替换的文本映射。
+
+    Returns:
+        清理并替换后的 Markdown 文本。
+    """
     processed = raw_text
     for annotation in annotations:
         if annotation["raw"] in replacements:
@@ -149,6 +203,11 @@ class DeepSeekOCRClient:
     """DeepSeek OCR 与向量服务的异步客户端。"""
 
     def __init__(self, base_url: str = "http://localhost:5000") -> None:
+        """初始化 OCR 客户端实例。
+
+        Parameters:
+            base_url: OCR 服务基础 URL。
+        """
         self.base_url = base_url.rstrip("/")
         self.ocr_endpoint = f"{self.base_url}/ocr"
 
@@ -159,6 +218,20 @@ class DeepSeekOCRClient:
         mode: Literal["processed", "raw"] = "processed",
         output_dir: Optional[str | Path] = None,
     ) -> Dict[str, Any]:
+        """Execute OCR on a single image or PDF page asynchronously.
+
+        Parameters:
+            image_path: 输入图像或 PDF 文件路径。
+            mode: 输出模式，`processed` 或 `raw`。
+            output_dir: 可选的输出目录，用于保存裁剪图像。
+
+        Returns:
+            OCR 结果字典，包括 markdown、images 以及分页详情。
+
+        Raises:
+            FileNotFoundError: 当路径不存在时抛出。
+            ValueError: 当文件类型不受支持时抛出。
+        """
         path_obj = Path(image_path)
         if not path_obj.is_file():
             raise FileNotFoundError(f"Image file not found: {image_path}")
@@ -193,6 +266,18 @@ class DeepSeekOCRClient:
         mode: Literal["processed", "raw"],
         output_dir: Optional[str | Path],
     ) -> Dict[str, Any]:
+        """Submit a single image for OCR and format the response.
+
+        Parameters:
+            image_path: 输入图像路径。
+            page_number: 页码信息，可选。
+            suggested_suffix: 推荐的文件名后缀。
+            mode: 输出模式。
+            output_dir: 可选的裁剪图像输出目录。
+
+        Returns:
+            单页 OCR 结果字典。
+        """
         form = aiohttp.FormData()
         form.add_field("file", image_path.read_bytes(), filename=image_path.name, content_type="image/png")
 
@@ -248,6 +333,16 @@ class DeepSeekOCRClient:
         mode: Literal["processed", "raw"],
         output_dir: Optional[str | Path],
     ) -> Dict[str, Any]:
+        """Perform OCR on each page of a PDF and merge the outputs.
+
+        Parameters:
+            pdf_path: PDF 文件路径。
+            mode: 输出模式。
+            output_dir: 可选的输出目录。
+
+        Returns:
+            聚合后的 OCR 结果字典。
+        """
         pdf_hash = await anyio.to_thread.run_sync(self._hash_file, pdf_path, limiter=None)
 
         markdown_segments: List[str] = []
@@ -300,6 +395,14 @@ class DeepSeekOCRClient:
 
     @staticmethod
     def _hash_file(path: Path) -> str:
+        """Return a short hash identifier for the given file.
+
+        Parameters:
+            path: 文件路径。
+
+        Returns:
+            32 位十六进制哈希前缀。
+        """
         hasher = hashlib.sha256()
         with path.open("rb") as file_obj:
             for chunk in iter(lambda: file_obj.read(4096), b""):
@@ -307,6 +410,14 @@ class DeepSeekOCRClient:
         return hasher.hexdigest()[:32]
 
     async def get_embeddings_async(self, texts: List[str]) -> List[List[float]]:
+        """Request embedding vectors for a batch of texts。
+
+        Parameters:
+            texts: 待编码文本列表。
+
+        Returns:
+            浮点向量列表。
+        """
         if not texts:
             return []
 
@@ -336,17 +447,34 @@ class DeepSeekOCRClient:
         mode: Literal["processed", "raw"] = "processed",
         output_dir: Optional[str | Path] = None,
     ) -> Dict[str, Any]:
-        """同步包装，以便在非异步环境中复用。"""
+        """同步包装，以便在非异步环境中复用。
+
+        Parameters:
+            image_path: 输入图像或 PDF 的路径。
+            mode: OCR 输出模式，默认为 `processed`。
+            output_dir: 可选的输出目录，保存裁剪图像。
+
+        Returns:
+            与 `ocr_image_async` 相同结构的 OCR 结果字典。
+        """
         return asyncio.run(
             self.ocr_image_async(image_path, mode=mode, output_dir=output_dir)
         )
 
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """同步包装，以兼容旧的调用路径。"""
+        """同步包装，以兼容旧的调用路径。
+
+        Parameters:
+            texts: 待编码的文本列表。
+
+        Returns:
+            对应的嵌入向量列表。
+        """
         return asyncio.run(self.get_embeddings_async(texts))
 
 
 async def _demo() -> None:  # pragma: no cover - manual test helper
+    """Minimal interactive demo for the OCR client."""
     client = DeepSeekOCRClient("http://127.0.0.1:5000")
     try:
         result = await client.ocr_image("test.png", mode="raw")
