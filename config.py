@@ -55,7 +55,19 @@ MAX_QUESTION_LENGTH = 10000  # 题目最大长度
 MAX_ANSWER_LENGTH = 5000     # 答案最大长度
 
 # OCR服务配置
-OCR_BASE_URL = os.environ.get("OCR_BASE_URL", "http://127.0.0.1:5000")
+OCR_BASE_URL = "http://192.168.31.65:5000"
+
+# OCR模式配置
+# - "processed": 使用 ocr_server 的 /ocr 接口（默认）
+# - "raw": 使用 generate 接口直接调用模型
+OCR_MODE = os.environ.get("OCR_MODE", "processed")
+
+# Raw OCR服务配置（用于raw mode，直接调用generate接口）
+RAW_OCR_CONFIG = {
+    "api_url": "http://192.168.31.101:8000/generate",
+    "model": "/Users/imac/dev/DeepSeek-OCR-8bit",
+    "prompt": "<|grounding|>Convert the document to markdown."
+}
 
 # Embedding服务配置
 EMBEDDING_CONFIG = {
@@ -68,7 +80,7 @@ EMBEDDING_CACHE_DB_PATH = "data/embeddings_cache.db"
 
 # LaTeX编译服务配置
 LATEX_COMPILE_CONFIG = {
-    "api_url": os.environ.get("LATEX_SERVICE_URL", "http://127.0.0.1:5100/compile-latex"),
+    "api_url": "http://192.168.31.65:5000/compile-latex",
     "compile_recipe": [
         ["xelatex", "-output-directory", "{output_dir}", "-interaction=nonstopmode", "{tex_file}"],
         ["xelatex", "-output-directory", "{output_dir}", "-interaction=nonstopmode", "{tex_file}"]

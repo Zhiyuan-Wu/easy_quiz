@@ -23,6 +23,8 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -39,6 +41,7 @@ from config import (
     EXAM_PARSE_ANSWER_BATCH_SIZE,
     HOMEWORK_UPLOAD_DIR,
     OCR_BASE_URL,
+    OCR_MODE,
     REPORT_MAX_ITEMS,
     SECRET_KEY,
     SYSTEM_DATABASE_PATH,
@@ -259,12 +262,13 @@ def generate_report_for_student(student: Dict[str, Any]):
     return report, history_for_report, latest_ts
 
 
-def log_error_with_details(exc: Exception, context: str, **kwargs) -> None:
+def log_error_with_details(exc: Exception, context: str, request: Optional[Request] = None, **kwargs) -> None:
     """Log detailed error information with contextual metadata。
 
     Parameters:
         exc: 捕获的异常。
         context: 错误发生的上下文描述。
+        request: 可选的请求对象，用于记录请求详细信息。
         **kwargs: 额外的调试信息。
     """
     traceback_str = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
@@ -274,14 +278,54 @@ def log_error_with_details(exc: Exception, context: str, **kwargs) -> None:
         "exception_message": str(exc),
         "traceback": traceback_str,
     }
+    
+    # 添加请求信息
+    if request:
+        try:
+            error_details["request"] = {
+                "method": request.method,
+                "url": str(request.url),
+                "path": request.url.path,
+                "query_params": dict(request.query_params),
+                "path_params": dict(request.path_params),
+                "headers": dict(request.headers),
+                "client": {
+                    "host": request.client.host if request.client else None,
+                    "port": request.client.port if request.client else None,
+                },
+            }
+            # 注意：读取请求体会消耗掉请求体，可能导致后续无法读取
+            # 这里只记录请求体是否存在，不实际读取
+            if request.method in ("POST", "PUT", "PATCH"):
+                error_details["request"]["has_body"] = True
+                error_details["request"]["body_note"] = "请求体存在但未读取（避免消耗请求流）"
+            # 尝试获取 session 信息
+            try:
+                session_data = dict(request.session) if hasattr(request, "session") else {}
+                # 隐藏敏感信息
+                if "user_id" in session_data:
+                    error_details["request"]["session"] = {"user_id": session_data.get("user_id")}
+            except Exception:  # noqa: BLE001
+                pass
+        except Exception as e:  # noqa: BLE001
+            error_details["request"] = f"<无法获取请求信息: {str(e)}>"
+    
+    # 添加额外的变量信息
     if kwargs:
         error_details["variables"] = {}
         for key, value in kwargs.items():
             try:
-                error_details["variables"][key] = value if isinstance(value, (str, int, float, bool, type(None))) else str(value)
+                # 限制字符串长度，避免日志过大
+                if isinstance(value, str) and len(value) > 1000:
+                    error_details["variables"][key] = value[:1000] + "...(截断)"
+                elif isinstance(value, (str, int, float, bool, type(None))):
+                    error_details["variables"][key] = value
+                else:
+                    error_details["variables"][key] = str(value)[:1000] + ("..." if len(str(value)) > 1000 else "")
             except Exception:  # noqa: BLE001
                 error_details["variables"][key] = "<无法序列化>"
-    logger.log_error(exc, f"{context} - 详细信息: {json.dumps(error_details, ensure_ascii=False)}")
+    
+    logger.log_error(exc, f"{context} - 详细信息: {json.dumps(error_details, ensure_ascii=False, indent=2)}")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1136,6 +1180,17 @@ async def search_questions(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.get("/api/questions/stats")
+async def get_question_stats(request: Request, user_id: int = Depends(require_login)):
+    """Return question statistics for the current user."""
+    try:
+        stats = await run_in_threadpool(question_manager.get_question_stats, user_id)
+        return {"success": True, "stats": stats}
+    except Exception as exc:  # noqa: BLE001
+        log_error_with_details(exc, "获取题目统计信息失败", request=request, user_id=user_id)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.get("/api/questions/{question_id}")
 async def get_question(
     question_id: int,
@@ -1200,17 +1255,6 @@ async def generate_question_variant(
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:  # noqa: BLE001
         log_error_with_details(exc, "AI变题失败", question_id=question_id, user_id=user_id)
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.get("/api/questions/stats")
-async def get_question_stats(user_id: int = Depends(require_login)):
-    """Return question statistics for the current user."""
-    try:
-        stats = await run_in_threadpool(question_manager.get_question_stats, user_id)
-        return {"success": True, "stats": stats}
-    except Exception as exc:  # noqa: BLE001
-        log_error_with_details(exc, "获取题目统计信息失败", user_id=user_id)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -1282,7 +1326,7 @@ async def pdf_preview(
 @app.post("/api/ocr-parse")
 async def ocr_parse(
     file: UploadFile = File(...),
-    mode: str = Form("processed"),
+    mode: Optional[str] = Form(None),
     user_id: int = Depends(require_login),
 ):
     """Run OCR on an uploaded exam and parse questions."""
@@ -1290,6 +1334,9 @@ async def ocr_parse(
         raise HTTPException(status_code=400, detail="没有选择文件")
     if not allowed_file(file.filename):
         raise HTTPException(status_code=400, detail="不支持的文件类型")
+
+    # 如果没有指定 mode，使用全局配置
+    ocr_mode = mode if mode else OCR_MODE
 
     upload_images_dir = os.path.join("uploads", "upload_images")
     os.makedirs(upload_images_dir, exist_ok=True)
@@ -1300,8 +1347,8 @@ async def ocr_parse(
     is_pdf = file.filename.lower().endswith(".pdf")
 
     try:
-        logger.log_system_info(f"开始OCR处理 - 文件: {file_path}")
-        ocr_result = await ocr_client.ocr_image_async(file_path, mode=mode)
+        logger.log_system_info(f"开始OCR处理 - 文件: {file_path}, 模式: {ocr_mode}")
+        ocr_result = await ocr_client.ocr_image_async(file_path, mode=ocr_mode)
         pages = ocr_result.get("pages") or []
 
         markdown_segments: List[str] = []
@@ -1478,15 +1525,80 @@ async def get_re_export_data(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle 422 validation errors with detailed logging."""
+    error_details = {
+        "error_type": "RequestValidationError",
+        "errors": exc.errors(),
+        "body": exc.body if hasattr(exc, "body") else None,
+    }
+    log_error_with_details(
+        exc,
+        "请求验证失败 (422)",
+        request=request,
+        validation_errors=error_details["errors"],
+        request_body=error_details.get("body"),
+    )
+    return JSONResponse(
+        {
+            "success": False,
+            "message": "请求参数验证失败",
+            "errors": error_details["errors"],
+        },
+        status_code=422,
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handle HTTP exceptions with detailed logging."""
+    log_error_with_details(
+        exc,
+        f"HTTP异常 ({exc.status_code})",
+        request=request,
+        status_code=exc.status_code,
+        detail=exc.detail if hasattr(exc, "detail") else str(exc),
+    )
+    return JSONResponse(
+        {"success": False, "message": exc.detail if hasattr(exc, "detail") else str(exc)},
+        status_code=exc.status_code,
+    )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all unhandled exceptions with detailed logging."""
+    log_error_with_details(
+        exc,
+        "未处理的异常",
+        request=request,
+    )
+    return JSONResponse(
+        {"success": False, "message": "服务器内部错误"},
+        status_code=500,
+    )
+
+
 @app.exception_handler(404)
 async def not_found(request: Request, exc: HTTPException):  # pragma: no cover - fallback
     """Handle 404 errors with a consistent JSON payload."""
+    log_error_with_details(
+        exc,
+        "404 页面不存在",
+        request=request,
+    )
     return JSONResponse({"success": False, "message": "页面不存在"}, status_code=404)
 
 
 @app.exception_handler(500)
 async def internal_error(request: Request, exc: HTTPException):  # pragma: no cover - fallback
     """Handle uncaught server errors."""
+    log_error_with_details(
+        exc,
+        "500 服务器内部错误",
+        request=request,
+    )
     return JSONResponse({"success": False, "message": "服务器内部错误"}, status_code=500)
 
 

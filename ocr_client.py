@@ -14,7 +14,7 @@ import aiohttp
 import anyio
 from PIL import Image
 
-from config import EMBEDDING_CONFIG
+from config import EMBEDDING_CONFIG, RAW_OCR_CONFIG
 from utils import convert_pdf_to_images
 
 RAW_MATCH_PATTERN = re.compile(
@@ -278,20 +278,64 @@ class DeepSeekOCRClient:
         Returns:
             单页 OCR 结果字典。
         """
-        form = aiohttp.FormData()
-        form.add_field("file", image_path.read_bytes(), filename=image_path.name, content_type="image/png")
+        if mode == "raw":
+            # Raw mode: 使用 generate 接口
+            image_data = base64.b64encode(image_path.read_bytes()).decode("utf-8")
+            payload = {
+                "model": RAW_OCR_CONFIG["model"],
+                "image": [f"data:image/jpeg;base64,{image_data}"],
+                "prompt": RAW_OCR_CONFIG["prompt"]
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    RAW_OCR_CONFIG["api_url"],
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                ) as response:
+                    response.raise_for_status()
+                    raw_payload = await response.json()
+            
+            # 从 raw_payload 中提取 text 字段作为 raw_text
+            raw_text = _clean_raw_text(raw_payload.get("text", ""))
+            # 生成一个 request_id（基于文件内容哈希）
+            request_id = self._hash_file(image_path)
+            
+            annotations = _collect_annotations(raw_text)
+            output_dir_path = Path(output_dir) if output_dir else None
 
-        endpoint = f"{self.ocr_endpoint}?mode={mode}"
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
-            async with session.post(endpoint, data=form) as response:
-                response.raise_for_status()
-                payload = await response.json()
+            cropped_images, image_replacements = await anyio.to_thread.run_sync(
+                _crop_images_from_annotations,
+                image_path,
+                annotations,
+                output_dir=output_dir_path,
+                limiter=None,
+            )
 
-        request_id = payload.get("request_id")
-        if not request_id:
-            raise ValueError("OCR service did not return request_id")
+            processed_markdown = _purge_control_tokens(raw_text, annotations, image_replacements)
 
-        if mode == "processed":
+            return {
+                "page": page_number,
+                "request_id": request_id,
+                "markdown": processed_markdown,
+                "images": cropped_images,
+                "suggested_suffix": suggested_suffix,
+                "raw": raw_payload,
+            }
+        else:
+            # Processed mode: 使用 ocr server 的 /ocr 接口（不带 mode 参数）
+            form = aiohttp.FormData()
+            form.add_field("file", image_path.read_bytes(), filename=image_path.name, content_type="image/png")
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.ocr_endpoint, data=form) as response:
+                    response.raise_for_status()
+                    payload = await response.json()
+
+            request_id = payload.get("request_id")
+            if not request_id:
+                raise ValueError("OCR service did not return request_id")
+
             markdown = payload.get("markdown") or payload.get("text") or ""
             images = payload.get("images") or []
             return {
@@ -302,29 +346,6 @@ class DeepSeekOCRClient:
                 "suggested_suffix": suggested_suffix,
                 "raw": payload,
             }
-
-        raw_text = _clean_raw_text(payload.get("raw_text", ""))
-        annotations = _collect_annotations(raw_text)
-        output_dir_path = Path(output_dir) if output_dir else None
-
-        cropped_images, image_replacements = await anyio.to_thread.run_sync(
-            _crop_images_from_annotations,
-            image_path,
-            annotations,
-            output_dir=output_dir_path,
-            limiter=None,
-        )
-
-        processed_markdown = _purge_control_tokens(raw_text, annotations, image_replacements)
-
-        return {
-            "page": page_number,
-            "request_id": request_id,
-            "markdown": processed_markdown,
-            "images": cropped_images,
-            "suggested_suffix": suggested_suffix,
-            "raw": payload,
-        }
 
     async def _ocr_pdf_async(
         self,
@@ -426,7 +447,7 @@ class DeepSeekOCRClient:
             "input": texts,
         }
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+        async with aiohttp.ClientSession() as session:
             async with session.post(
                 EMBEDDING_CONFIG["api_url"],
                 json=payload,
