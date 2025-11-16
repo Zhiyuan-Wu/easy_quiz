@@ -3,6 +3,8 @@
 高考题目录入和自动打标系统配置文件
 """
 
+import os
+
 # 数据库配置
 DATABASE_PATH = "question_database.db"
 SYSTEM_DATABASE_PATH = "system.db"
@@ -54,6 +56,18 @@ MAX_ANSWER_LENGTH = 5000     # 答案最大长度
 
 # OCR服务配置
 OCR_BASE_URL = "http://192.168.31.65:5000"
+
+# OCR模式配置
+# - "processed": 使用 ocr_server 的 /ocr 接口（默认）
+# - "raw": 使用 generate 接口直接调用模型
+OCR_MODE = os.environ.get("OCR_MODE", "processed")
+
+# Raw OCR服务配置（用于raw mode，直接调用generate接口）
+RAW_OCR_CONFIG = {
+    "api_url": "http://192.168.31.101:8000/generate",
+    "model": "/Users/imac/dev/DeepSeek-OCR-8bit",
+    "prompt": "<|grounding|>Convert the document to markdown."
+}
 
 # Embedding服务配置
 EMBEDDING_CONFIG = {

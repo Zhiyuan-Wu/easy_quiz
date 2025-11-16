@@ -9,3 +9,8 @@ numpy
 faiss-cpu
 pytest
 pdf2image
+fastapi
+uvicorn
+aiohttp
+python-multipart
+Pillow

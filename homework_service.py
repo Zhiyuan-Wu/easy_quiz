@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
+from config import OCR_MODE
 from utils import (
     apply_filename_replacements,
     match_student_by_filename,
@@ -184,7 +185,7 @@ class HomeworkBatchProcessor:
         user_id: int,
     ) -> Dict[str, Any]:
         """解析单个作业文件，返回结构化结果。"""
-        ocr_response = self.ocr_client.ocr_image(entry.stored_path)
+        ocr_response = self.ocr_client.ocr_image(entry.stored_path, mode=OCR_MODE)
         pages = ocr_response.get("pages") or []
 
         markdown_segments: List[str] = []

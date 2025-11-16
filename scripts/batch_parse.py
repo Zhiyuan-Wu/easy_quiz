@@ -9,7 +9,7 @@ from typing import Iterable, List, Tuple
 import sys
 sys.path.append("../easy_quiz")
 
-from config import EXAM_PARSE_ANSWER_BATCH_SIZE, SYSTEM_DATABASE_PATH
+from config import EXAM_PARSE_ANSWER_BATCH_SIZE, OCR_MODE, SYSTEM_DATABASE_PATH
 from logger import get_logger
 from ocr_client import DeepSeekOCRClient
 from question_manager import QuestionManager
@@ -59,8 +59,8 @@ def process_file(
     stored_path = upload_images_dir / unique_filename
     shutil.copy2(source_path, stored_path)
 
-    logger.log_system_info(f"批量解析 - OCR文件: {stored_path}")
-    ocr_result = ocr_client.ocr_image(str(stored_path))
+    logger.log_system_info(f"批量解析 - OCR文件: {stored_path}, 模式: {OCR_MODE}")
+    ocr_result = ocr_client.ocr_image(str(stored_path), mode=OCR_MODE)
     pages = ocr_result.get("pages") or []
 
     markdown_segments: List[str] = []
