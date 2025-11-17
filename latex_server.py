@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import anyio
 from fastapi import FastAPI, HTTPException
@@ -37,7 +37,7 @@ app = FastAPI(
 )
 
 
-async def _compile_latex(payload: CompileRequest) -> Dict[str, str]:
+async def _compile_latex(payload: CompileRequest) -> Dict[str, Any]:
     """Compile LaTeX content on a worker thread.
 
     Parameters:
@@ -50,7 +50,7 @@ async def _compile_latex(payload: CompileRequest) -> Dict[str, str]:
     return await anyio.to_thread.run_sync(_compile_latex_sync, payload, limiter=None)
 
 
-def _compile_latex_sync(payload: CompileRequest) -> Dict[str, str]:
+def _compile_latex_sync(payload: CompileRequest) -> Dict[str, Any]:
     """Compile LaTeX synchronously inside a temporary directory.
 
     Parameters:
@@ -138,7 +138,7 @@ def _compile_latex_sync(payload: CompileRequest) -> Dict[str, str]:
 
 
 @app.post("/compile-latex")
-async def compile_latex_endpoint(payload: CompileRequest) -> Dict[str, str]:
+async def compile_latex_endpoint(payload: CompileRequest) -> Dict[str, Any]:
     """
     将 LaTeX 内容编译成 PDF。
 
