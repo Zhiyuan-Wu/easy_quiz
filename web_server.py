@@ -560,7 +560,7 @@ async def parse_student_homework(
     save_path = os.path.join(HOMEWORK_UPLOAD_DIR, unique_filename)
     os.makedirs(HOMEWORK_UPLOAD_DIR, exist_ok=True)
     content = await file.read()
-    await anyio.write_file(save_path, content)
+    await anyio.Path(save_path).write_bytes(content)
 
     try:
         entry = HomeworkFileEntry(
@@ -641,7 +641,7 @@ async def batch_parse_homework(
         save_path = os.path.join(HOMEWORK_UPLOAD_DIR, unique_filename)
         try:
             content = await uploaded.read()
-            await anyio.write_file(save_path, content)
+            await anyio.Path(save_path).write_bytes(content)
             entries.append(
                 HomeworkFileEntry(
                     original_filename=original_filename,
@@ -1272,7 +1272,7 @@ async def upload_file(
     unique_filename = f"{uuid.uuid4()}{os.path.splitext(file.filename)[1]}"
     save_path = os.path.join("uploads", unique_filename)
     content = await file.read()
-    await anyio.write_file(save_path, content)
+    await anyio.Path(save_path).write_bytes(content)
     return {"success": True, "filename": unique_filename, "url": f"/uploads/{unique_filename}"}
 
 
@@ -1343,7 +1343,7 @@ async def ocr_parse(
     unique_filename = f"{uuid.uuid4()}{os.path.splitext(file.filename)[1]}"
     file_path = os.path.join(upload_images_dir, unique_filename)
     content = await file.read()
-    await anyio.write_file(file_path, content)
+    await anyio.Path(file_path).write_bytes(content)
     is_pdf = file.filename.lower().endswith(".pdf")
 
     try:
