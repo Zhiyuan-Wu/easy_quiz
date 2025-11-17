@@ -25,7 +25,7 @@ from fastapi import (
 )
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from logger import get_logger
@@ -70,6 +70,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 if not os.path.exists("uploads"):
     os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# 添加 /images 路径别名，指向 uploads 目录，以兼容前端代码
+app.mount("/images", StaticFiles(directory="uploads"), name="images")
 templates = Jinja2Templates(directory="templates")
 
 # 初始化服务对象
@@ -329,16 +331,20 @@ def log_error_with_details(exc: Exception, context: str, request: Optional[Reque
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request, user_id: int = Depends(require_login)):
+async def index(request: Request):
     """Render the main dashboard page for authenticated users.
+    Redirects to login page if user is not authenticated.
 
     Parameters:
         request: 当前请求对象。
-        user_id: FastAPI 依赖注入的已登录用户 ID。
 
     Returns:
-        渲染后的首页模板响应。
+        渲染后的首页模板响应，或重定向到登录页面。
     """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse(url="/login", status_code=302)
+    
     user = await run_in_threadpool(system_manager.get_user_by_id, user_id)
     return templates.TemplateResponse("index.html", {"request": request, "user": user})
 

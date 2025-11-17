@@ -66,7 +66,9 @@ OCR_MODE = os.environ.get("OCR_MODE", "processed")
 RAW_OCR_CONFIG = {
     "api_url": "http://192.168.31.101:8000/generate",
     "model": "/Users/imac/dev/DeepSeek-OCR-8bit",
-    "prompt": "<|grounding|>Convert the document to markdown."
+    "prompt": "<|grounding|>Convert the document to markdown.",
+    "max_tokens": 8192,
+    "temperature": 0.0
 }
 
 # Embedding服务配置

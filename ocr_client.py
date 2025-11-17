@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import hashlib
 import json
 import re
@@ -284,7 +285,9 @@ class DeepSeekOCRClient:
             payload = {
                 "model": RAW_OCR_CONFIG["model"],
                 "image": [f"data:image/jpeg;base64,{image_data}"],
-                "prompt": RAW_OCR_CONFIG["prompt"]
+                "prompt": RAW_OCR_CONFIG["prompt"],
+                "max_tokens": RAW_OCR_CONFIG["max_tokens"],
+                "temperature": RAW_OCR_CONFIG["temperature"]
             }
             
             async with aiohttp.ClientSession() as session:
@@ -305,10 +308,12 @@ class DeepSeekOCRClient:
             output_dir_path = Path(output_dir) if output_dir else None
 
             cropped_images, image_replacements = await anyio.to_thread.run_sync(
-                _crop_images_from_annotations,
-                image_path,
-                annotations,
-                output_dir=output_dir_path,
+                functools.partial(
+                    _crop_images_from_annotations,
+                    image_path,
+                    annotations,
+                    output_dir=output_dir_path,
+                ),
                 limiter=None,
             )
 
