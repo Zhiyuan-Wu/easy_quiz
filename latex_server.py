@@ -164,4 +164,4 @@ async def healthz() -> Dict[str, str]:
 if __name__ == "__main__":  # pragma: no cover - manual launch helper
     import uvicorn
 
-    uvicorn.run("latex_server:app", host="0.0.0.0", port=5100, reload=False)
+    uvicorn.run("latex_server:app", host="0.0.0.0", port=5000, reload=False)
