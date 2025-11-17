@@ -307,7 +307,7 @@ function renderParsedQuestions() {
     renderMath();
 }
 
-async function handleBatchSave() {
+async function handleOcrBatchSave() {
     if (!parsedQuestions || parsedQuestions.length === 0) {
         showMessage('没有可保存的题目', 'error');
         return;
@@ -398,13 +398,5 @@ window.handleExamUpload = handleExamUpload;
 window.removeExam = removeExam;
 window.handleParseExam = handleParseExam;
 window.renderParsedQuestions = renderParsedQuestions;
-window.handleBatchSave = handleBatchSave;
+window.handleOcrBatchSave = handleOcrBatchSave;
 window.addParsedToCart = addParsedToCart;
-
-// 绑定试卷扫描页面的批量保存按钮
-document.addEventListener('DOMContentLoaded', () => {
-    const ocrBatchSaveBtn = document.getElementById('ocr-batch-save-btn');
-    if (ocrBatchSaveBtn) {
-        ocrBatchSaveBtn.addEventListener('click', handleBatchSave);
-    }
-});

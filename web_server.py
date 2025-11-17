@@ -25,7 +25,7 @@ from fastapi import (
 )
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from logger import get_logger
@@ -368,6 +368,12 @@ async def profile(request: Request, user_id: int = Depends(require_login)):
 async def login_page(request: Request):
     """Render the login page."""
     return templates.TemplateResponse("login.html", {"request": request})
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    """Handle favicon requests to avoid 404 errors."""
+    return Response(status_code=204)
 
 
 @app.post("/api/auth/register")

@@ -152,6 +152,7 @@ const examUploadBtn = document.getElementById('exam-upload-btn');
 const examClipboardBtn = document.getElementById('exam-clipboard-btn');
 const examPreview = document.getElementById('exam-preview');
 const parseExamBtn = document.getElementById('parse-exam-btn');
+const ocrBatchSaveBtn = document.getElementById('ocr-batch-save-btn');
 const parsedQuestionsDiv = document.getElementById('parsed-questions');
 const parsedQuestionsList = document.getElementById('parsed-questions-list');
 
@@ -331,6 +332,9 @@ function setupEventListeners() {
     }
     if (parseExamBtn) {
         parseExamBtn.addEventListener('click', handleParseExam);
+    }
+    if (ocrBatchSaveBtn) {
+        ocrBatchSaveBtn.addEventListener('click', handleOcrBatchSave);
     }
 
     const uploadZone = document.getElementById('upload-zone');
@@ -805,8 +809,8 @@ function renderMathContent(content) {
 
 function renderMath() {
     if (window.MathJax) {
-        MathJax.typesetPromise().catch((err) => {
-            console.log('MathJax渲染错误:', err);
+        MathJax.typesetPromise().catch(() => {
+            // MathJax 渲染错误静默处理
         });
     }
 }
