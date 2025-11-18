@@ -252,7 +252,7 @@ class QuestionManager:
             return 0.0
         return float(dot_product / (norm1 * norm2))
     
-    def _compute_missing_embeddings_async(self, question_ids: List[int], current_user_id: int = None):
+    async def _compute_missing_embeddings_async(self, question_ids: List[int], current_user_id: int = None):
         """异步计算缺失的 embedding 向量。
 
         参数:
@@ -262,79 +262,68 @@ class QuestionManager:
         返回:
             None。
         """
-        def compute_task():
-            """后台线程任务：加载题目、计算 embedding 并更新缓存。
-
-            返回:
-                None。
-            """
-            processed_ids = set()  # 记录成功处理的question_id
-            try:
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
+        processed_ids = set()  # 记录成功处理的question_id
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # 第一步：收集所有需要计算embedding的题目文本
+            question_data_list = []  # [(question_id, question_text), ...]
+            
+            for question_id in question_ids:
+                # 再次检查是否已有embedding（防止并发情况）
+                if question_id in self.embedding_cache:
+                    processed_ids.add(question_id)
+                    continue
                 
-                # 第一步：收集所有需要计算embedding的题目文本
-                question_data_list = []  # [(question_id, question_text), ...]
+                # 获取题目信息
+                cursor.execute('''
+                    SELECT * FROM questions 
+                    WHERE id = ? AND (visibility = 'public' OR user_id = ?)
+                ''', (question_id, current_user_id))
                 
-                for question_id in question_ids:
-                    # 再次检查是否已有embedding（防止并发情况）
-                    if question_id in self.embedding_cache:
-                        processed_ids.add(question_id)
-                        continue
+                row = cursor.fetchone()
+                if not row:
+                    processed_ids.add(question_id)  # 题目不存在，也标记为已处理，避免重复尝试
+                    continue
+                
+                question = self._row_to_dict(row)
+                question_text = self._get_question_text(question)
+                question_data_list.append((question_id, question_text))
+            
+            conn.close()
+            
+            # 第二步：批量计算所有题目的embedding
+            if question_data_list:
+                try:
+                    # 提取所有文本
+                    question_texts = [text for _, text in question_data_list]
+                    # 批量请求embeddings
+                    embeddings_list = await self.ocr_client.get_embeddings_async(question_texts)
                     
-                    # 获取题目信息
-                    cursor.execute('''
-                        SELECT * FROM questions 
-                        WHERE id = ? AND (visibility = 'public' OR user_id = ?)
-                    ''', (question_id, current_user_id))
-                    
-                    row = cursor.fetchone()
-                    if not row:
-                        processed_ids.add(question_id)  # 题目不存在，也标记为已处理，避免重复尝试
-                        continue
-                    
-                    question = self._row_to_dict(row)
-                    question_text = self._get_question_text(question)
-                    question_data_list.append((question_id, question_text))
-                
-                conn.close()
-                
-                # 第二步：批量计算所有题目的embedding
-                if question_data_list:
-                    try:
-                        # 提取所有文本
-                        question_texts = [text for _, text in question_data_list]
-                        # 批量请求embeddings
-                        embeddings_list = self.ocr_client.get_embeddings(question_texts)
-                        
-                        # 第三步：保存所有embedding结果
-                        if embeddings_list and len(embeddings_list) == len(question_data_list):
-                            for idx, (question_id, _) in enumerate(question_data_list):
-                                # 再次检查是否已有embedding（防止在计算过程中被其他线程写入）
-                                if question_id not in self.embedding_cache:
-                                    self._save_embedding_to_cache(question_id, embeddings_list[idx])
-                                processed_ids.add(question_id)
-                        else:
-                            # 如果返回的embedding数量不匹配，记录错误但标记为已处理
-                            self.logger.log_error(
-                                ValueError(f"Embedding数量不匹配: 期望{len(question_data_list)}, 实际{len(embeddings_list) if embeddings_list else 0}"),
-                                "批量计算embedding"
-                            )
-                    except Exception as e:
-                        self.logger.log_error(e, "批量计算embedding失败")
-                
-            except Exception as e:
-                self.logger.log_error(e, "异步计算embedding任务失败")
-            finally:
-                # 从正在处理的集合中移除本次任务处理的question_id
-                with self._async_task_lock:
-                    # 移除已处理的ID（包括成功和失败的）
-                    self._processing_question_ids.difference_update(question_ids)
-        
-        # 在后台线程中执行
-        thread = threading.Thread(target=compute_task)
-        thread.daemon = True
-        thread.start()
+                    # 第三步：保存所有embedding结果
+                    if embeddings_list and len(embeddings_list) == len(question_data_list):
+                        for idx, (question_id, _) in enumerate(question_data_list):
+                            # 再次检查是否已有embedding（防止在计算过程中被其他线程写入）
+                            if question_id not in self.embedding_cache:
+                                self._save_embedding_to_cache(question_id, embeddings_list[idx])
+                            processed_ids.add(question_id)
+                    else:
+                        # 如果返回的embedding数量不匹配，记录错误但标记为已处理
+                        self.logger.log_error(
+                            ValueError(f"Embedding数量不匹配: 期望{len(question_data_list)}, 实际{len(embeddings_list) if embeddings_list else 0}"),
+                            "批量计算embedding"
+                        )
+                except Exception as e:
+                    self.logger.log_error(e, "批量计算embedding失败")
+            
+        except Exception as e:
+            self.logger.log_error(e, "异步计算embedding任务失败")
+        finally:
+            # 从正在处理的集合中移除本次任务处理的question_id
+            with self._async_task_lock:
+                # 移除已处理的ID（包括成功和失败的）
+                self._processing_question_ids.difference_update(question_ids)
     
     def add_question(self, latex_content: str, tags: List[str] = None, 
                     reference_answer: str = None, source: str = None, 
@@ -403,7 +392,7 @@ class QuestionManager:
         finally:
             conn.close()
     
-    def update_question(self, question_id: int, latex_content: str,
+    async def update_question(self, question_id: int, latex_content: str,
                         reference_answer: Optional[str], current_user_id: int,
                         question_type: Optional[str] = None) -> Optional[Dict]:
         """更新题目内容并刷新对应的 embedding。
@@ -466,7 +455,7 @@ class QuestionManager:
         if updated_question:
             try:
                 question_text = self._get_question_text(updated_question)
-                embeddings = self.ocr_client.get_embeddings([question_text])
+                embeddings = await self.ocr_client.get_embeddings_async([question_text])
                 if embeddings and len(embeddings) > 0:
                     self._save_embedding_to_cache(question_id, embeddings[0])
             except Exception as e:
@@ -1072,7 +1061,7 @@ LaTeX题面:
         
         return questions
     
-    def search_questions(self, keyword: str, current_user_id: int = None, k: int = 10) -> List[Dict]:
+    async def search_questions(self, keyword: str, current_user_id: int = None, k: int = 10) -> List[Dict]:
         """结合关键词与 embedding 召回搜索题目。
 
         参数:
@@ -1130,7 +1119,7 @@ LaTeX题面:
                 query_text = self._get_detailed_instruct(task, keyword)
                 
                 # 获取查询的embedding
-                query_embeddings = self.ocr_client.get_embeddings([query_text])
+                query_embeddings = await self.ocr_client.get_embeddings_async([query_text])
                 if query_embeddings and len(query_embeddings) > 0:
                     query_embedding = query_embeddings[0]
                     query_embedding_array = np.array([query_embedding], dtype='float32')
@@ -1212,7 +1201,8 @@ LaTeX题面:
                     self._processing_question_ids.update(new_missing_ids)
                 
                 if new_missing_ids:
-                    self._compute_missing_embeddings_async(new_missing_ids, current_user_id)
+                    # 在后台任务中异步执行，不阻塞当前搜索
+                    asyncio.create_task(self._compute_missing_embeddings_async(new_missing_ids, current_user_id))
         
         # 6. 返回合并后的结果列表
         results = list(result_dict.values())

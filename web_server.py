@@ -993,7 +993,7 @@ async def get_student_recommendations(
         student = await run_in_threadpool(student_manager.get_student, student_id, user_id)
         if not student:
             raise HTTPException(status_code=404, detail="学生不存在")
-        recommendations = await run_in_threadpool(student_manager.build_recommendations, student_id, user_id)
+        recommendations = await student_manager.build_recommendations(student_id, user_id)
         return {"success": True, "questions": recommendations}
     except HTTPException:
         raise
@@ -1079,8 +1079,7 @@ async def update_question(
             raise HTTPException(status_code=404, detail="题目不存在或无权访问")
         if question.get("user_id") != user_id:
             raise HTTPException(status_code=403, detail="无权修改该题目")
-        updated_question = await run_in_threadpool(
-            question_manager.update_question,
+        updated_question = await question_manager.update_question(
             question_id,
             latex_content,
             reference_answer,
@@ -1171,7 +1170,7 @@ async def search_questions(
         if tags:
             questions = await run_in_threadpool(question_manager.get_questions_by_tags, tags, user_id)
         elif keyword:
-            questions = await run_in_threadpool(question_manager.search_questions, keyword, user_id)
+            questions = await question_manager.search_questions(keyword, user_id)
         else:
             questions = await run_in_threadpool(question_manager.get_all_questions, limit, offset, user_id)
         return {"success": True, "questions": questions, "total": len(questions)}

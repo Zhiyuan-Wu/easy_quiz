@@ -1076,7 +1076,7 @@ class StudentManager:
         normalized_points = [kp.strip() for kp in knowledge_points if isinstance(kp, str) and kp.strip()]
         return normalized_points[:5]
 
-    def build_recommendations(
+    async def build_recommendations(
         self,
         student_id: str,
         current_user_id: Optional[int] = None,
@@ -1105,12 +1105,12 @@ class StudentManager:
         aggregated: Dict[int, Dict] = {}
         for reason in reasons:
             try:
-                results = self.question_manager.search_questions(
+                results = await self.question_manager.search_questions(
                     reason,
                     current_user_id=current_user_id,
                 )
             except TypeError:
-                results = self.question_manager.search_questions(reason, current_user_id=current_user_id)
+                results = await self.question_manager.search_questions(reason, current_user_id=current_user_id)
 
             for question in results:
                 qid = question.get("id")

@@ -185,7 +185,7 @@ class HomeworkBatchProcessor:
         user_id: int,
     ) -> Dict[str, Any]:
         """解析单个作业文件，返回结构化结果。"""
-        ocr_response = self.ocr_client.ocr_image(entry.stored_path, mode=OCR_MODE)
+        ocr_response = await self.ocr_client.ocr_image_async(entry.stored_path, mode=OCR_MODE)
         pages = ocr_response.get("pages") or []
 
         markdown_segments: List[str] = []
