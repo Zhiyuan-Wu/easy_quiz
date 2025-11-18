@@ -80,25 +80,6 @@ class QuestionManager:
         self._async_task_lock = threading.Lock()
         self._processing_question_ids = set()  # 正在计算embedding的question_id集合
 
-    async def _chat_completion(self, messages: List[Dict[str, str]], **kwargs) -> str:
-        """调用异步OpenAI客户端并返回响应文本。"""
-        response = await self.llm_client.chat.completions.create(
-            model=LLM_CONFIG["model"],
-            messages=messages,
-            **kwargs,
-        )
-        return response.choices[0].message.content
-
-    def _run_async(self, coro):
-        """在同步上下文中执行协程。"""
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(coro)
-        else:
-            future = asyncio.run_coroutine_threadsafe(coro, loop)
-            return future.result()
-    
     def init_database(self):
         """初始化题目数据库表结构。
 
@@ -560,7 +541,7 @@ class QuestionManager:
         return None
     
     
-    def auto_tag_and_answer(self, content: str, source: str = None) -> Tuple[List[str], str, str, str]:
+    async def auto_tag_and_answer(self, content: str, source: str = None) -> Tuple[List[str], str, str, str]:
         """使用大模型为题目自动打标并生成解答与 LaTeX。
 
         参数:
@@ -603,12 +584,11 @@ class QuestionManager:
             self.logger.log_llm_prompt(prompt, "自动打标和LaTeX格式化")
             
             # 调用大语言模型API
-            response = self._run_async(
-                self._chat_completion(
-                    [{"role": "user", "content": prompt}]
-                )
+            llm_response = await self.llm_client.chat.completions.create(
+                model=LLM_CONFIG["model"],
+                messages=[{"role": "user", "content": prompt}],
             )
-            
+            response = llm_response.choices[0].message.content
             self.logger.log_llm_response(response, "自动打标和LaTeX格式化")
             
             # 解析响应
@@ -650,7 +630,7 @@ class QuestionManager:
             self.logger.log_error(e, "自动打标失败")
             return [], "自动生成解答失败，请手动输入", content, '解答题'
 
-    def generate_question_variant(self, question: Dict) -> Dict:
+    async def generate_question_variant(self, question: Dict) -> Dict:
         """基于原题生成微调后的题目变体。
 
         参数:
@@ -704,12 +684,11 @@ class QuestionManager:
 
         self.logger.log_llm_prompt(prompt, "AI变题")
 
-        content = self._run_async(
-            self._chat_completion(
-                [{"role": "user", "content": prompt}]
-            )
+        llm_response = await self.llm_client.chat.completions.create(
+            model=LLM_CONFIG["model"],
+            messages=[{"role": "user", "content": prompt}],
         )
-
+        content = llm_response.choices[0].message.content
         self.logger.log_llm_response(content, "AI变题")
 
         try:
@@ -732,7 +711,7 @@ class QuestionManager:
             'tags': new_tags
         }
     
-    def parse_exam_paper(
+    async def parse_exam_paper(
         self,
         markdown_content: str,
         image_filename_mapping: Dict[str, str] = None,
@@ -854,12 +833,11 @@ class QuestionManager:
             self.logger.log_llm_prompt(prompt, "试卷解析")
             
             # 调用大语言模型API
-            response = self._run_async(
-                self._chat_completion(
-                    [{"role": "user", "content": prompt}]
-                )
+            llm_response = await self.llm_client.chat.completions.create(
+                model=LLM_CONFIG["model"],
+                messages=[{"role": "user", "content": prompt}],
             )
-            
+            response = llm_response.choices[0].message.content
             self.logger.log_llm_response(response, "试卷解析")
             
             # 解析响应
@@ -967,9 +945,11 @@ LaTeX题面:
                         batch_prompt = _build_answer_prompt(batch_indices)
                         context_name = f"试卷答案生成-批次{batch_number}"
                         self.logger.log_llm_prompt(batch_prompt, context_name)
-                        content = await self._chat_completion(
-                            [{"role": "user", "content": batch_prompt}]
+                        llm_response = await self.llm_client.chat.completions.create(
+                            model=LLM_CONFIG["model"],
+                            messages=[{"role": "user", "content": batch_prompt}],
                         )
+                        content = llm_response.choices[0].message.content
                         self.logger.log_llm_response(content, context_name)
 
                         try:
@@ -1013,7 +993,7 @@ LaTeX题面:
                         return await asyncio.gather(*tasks, return_exceptions=True)
 
                     answers_collected: Dict[int, str] = {}
-                    results = self._run_async(_gather_all_batches())
+                    results = await _gather_all_batches()
                     for batch_number, batch_result in enumerate(results, start=1):
                         if isinstance(batch_result, Exception):
                             self.logger.log_error(batch_result, f"批次 {batch_number} 答案生成任务异常")

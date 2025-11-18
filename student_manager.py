@@ -844,7 +844,7 @@ class StudentManager:
 """
         return prompt
 
-    def parse_homework_ocr(
+    async def parse_homework_ocr(
         self,
         paper_title: str,
         questions: List[Dict],
@@ -880,7 +880,7 @@ class StudentManager:
         prompt = self.build_homework_prompt(paper_title, questions, ocr_text, roster)
         self.logger.log_llm_prompt(prompt, "作业批改")
 
-        response = self.llm_client.chat.completions.create(
+        response = await self.llm_client.chat.completions.create(
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -963,7 +963,7 @@ class StudentManager:
 """
         return prompt
 
-    def generate_learning_report(self, student_name: str, history: List[Dict]) -> Dict:
+    async def generate_learning_report(self, student_name: str, history: List[Dict]) -> Dict:
         """调用大模型生成学习报告并解析结果。
 
         参数:
@@ -979,7 +979,7 @@ class StudentManager:
         prompt = self.build_report_prompt(student_name, history)
         self.logger.log_llm_prompt(prompt, "学习报告生成")
 
-        response = self.llm_client.chat.completions.create(
+        response = await self.llm_client.chat.completions.create(
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}],
         )

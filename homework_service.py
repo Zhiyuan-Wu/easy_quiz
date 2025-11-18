@@ -46,7 +46,7 @@ class HomeworkBatchProcessor:
 
         os.makedirs(self.upload_root, exist_ok=True)
 
-    def process_batch(
+    async def process_batch(
         self,
         file_entries: Sequence[HomeworkFileEntry],
         export_id: int,
@@ -96,7 +96,7 @@ class HomeworkBatchProcessor:
             forced_name = entry.forced_student_name or force_student_name
 
             try:
-                parse_result = self._parse_single_file(
+                parse_result = await self._parse_single_file(
                     entry,
                     questions,
                     paper_title,
@@ -177,7 +177,7 @@ class HomeworkBatchProcessor:
             "failures": failures,
         }
 
-    def _parse_single_file(
+    async def _parse_single_file(
         self,
         entry: HomeworkFileEntry,
         questions: List[Dict[str, Any]],
@@ -215,7 +215,7 @@ class HomeworkBatchProcessor:
 
         ocr_text = "\n\n".join(markdown_segments)
 
-        parse_payload = self.student_manager.parse_homework_ocr(
+        parse_payload = await self.student_manager.parse_homework_ocr(
             paper_title,
             questions,
             ocr_text,

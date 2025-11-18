@@ -20,7 +20,7 @@ LLM_CONFIG = {
     "api_key": "your-api-key",  # 替换为实际的API密钥
     "model": "deepseek-chat",  # 或使用其他模型
     "temperature": 0.7,
-    "max_tokens": 4000
+    "max_tokens": 7000
 }
 
 # 题目标签配置
@@ -67,7 +67,7 @@ RAW_OCR_CONFIG = {
     "api_url": "http://192.168.31.101:8000/generate",
     "model": "/Users/imac/dev/DeepSeek-OCR-8bit",
     "prompt": "<|grounding|>Convert the document to markdown.",
-    "max_tokens": 8192,
+    "max_tokens": 4096,
     "temperature": 0.0
 }
 

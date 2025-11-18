@@ -243,7 +243,7 @@ def collect_history_for_report(student_id: str):
     return history_records, trimmed, latest_ts
 
 
-def generate_report_for_student(student: Dict[str, Any]):
+async def generate_report_for_student(student: Dict[str, Any]):
     """Generate a learning report for the specified student。
 
     Parameters:
@@ -259,7 +259,7 @@ def generate_report_for_student(student: Dict[str, Any]):
     if not history_for_report:
         raise ValueError("暂无做题历史，无法生成报告")
 
-    report = student_manager.generate_learning_report(student["name"], history_for_report)
+    report = await student_manager.generate_learning_report(student["name"], history_for_report)
     student_manager.cache_report(student["student_id"], report, latest_ts)
     return report, history_for_report, latest_ts
 
@@ -580,14 +580,12 @@ async def parse_student_homework(
             stored_filename=unique_filename,
             stored_path=save_path,
         )
-        batch_result = await run_in_threadpool(
-            lambda: homework_processor.process_batch(
-                [entry],
-                export_id,
-                user_id,
-                force_student_id=student_id,
-                force_student_name=student_name,
-            )
+        batch_result = await homework_processor.process_batch(
+            [entry],
+            export_id,
+            user_id,
+            force_student_id=student_id,
+            force_student_name=student_name,
         )
         mapping: Dict[str, Dict[str, Any]] = batch_result.get("mapping", {})
         mapping_entry = mapping.get(student_id) or (mapping.get(batch_result["order"][0]) if batch_result.get("order") else None)
@@ -677,14 +675,12 @@ async def batch_parse_homework(
         }
 
     try:
-        batch_result = await run_in_threadpool(
-            lambda: homework_processor.process_batch(
-                entries,
-                export_id,
-                user_id,
-                force_student_id=force_student_id,
-                force_student_name=force_student_name,
-            )
+        batch_result = await homework_processor.process_batch(
+            entries,
+            export_id,
+            user_id,
+            force_student_id=force_student_id,
+            force_student_name=force_student_name,
         )
         failures = batch_result.get("failures", [])
         if pre_failures:
@@ -951,7 +947,7 @@ async def get_student_report(
             raise HTTPException(status_code=404, detail="学生不存在")
 
         if refresh or student_manager.needs_report_refresh(student_id):
-            report, history_for_report, _ = await run_in_threadpool(generate_report_for_student, student)
+            report, history_for_report, _ = await generate_report_for_student(student)
             return {
                 "success": True,
                 "report": report,
@@ -1126,8 +1122,7 @@ async def auto_tag_question(
     start_time = time.time()
     try:
         logger.log_user_action(user_id, "自动打标和LaTeX格式化", f"内容长度: {len(content)}")
-        tags, answer, latex_content, question_type = await run_in_threadpool(
-            question_manager.auto_tag_and_answer,
+        tags, answer, latex_content, question_type = await question_manager.auto_tag_and_answer(
             content,
             source,
         )
@@ -1258,7 +1253,7 @@ async def generate_question_variant(
         if payload.get("reference_answer") is not None:
             working_question["reference_answer"] = payload["reference_answer"]
 
-        variant = await run_in_threadpool(question_manager.generate_question_variant, working_question)
+        variant = await question_manager.generate_question_variant(working_question)
         return {"success": True, "variant": variant}
     except HTTPException:
         raise
@@ -1394,8 +1389,7 @@ async def ocr_parse(
             f"开始解析试卷，markdown内容长度: {len(markdown_content)}, 可用图片数量: {len(image_filename_mapping)}"
         )
 
-        parsed_questions = await run_in_threadpool(
-            question_manager.parse_exam_paper,
+        parsed_questions = await question_manager.parse_exam_paper(
             markdown_content,
             image_filename_mapping,
             EXAM_PARSE_ANSWER_BATCH_SIZE if is_pdf else None,
