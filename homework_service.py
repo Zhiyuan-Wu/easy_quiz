@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
 from config import OCR_MODE
+from ocr_client import DeepSeekOCRClient
+from student_manager import StudentManager
+from question_manager import QuestionManager
+from system_manager import SystemManager
 from utils import (
     apply_filename_replacements,
     match_student_by_filename,
@@ -37,10 +41,10 @@ class HomeworkBatchProcessor:
         upload_root: str,
         logger,
     ) -> None:
-        self.ocr_client = ocr_client
-        self.student_manager = student_manager
-        self.question_manager = question_manager
-        self.system_manager = system_manager
+        self.ocr_client: DeepSeekOCRClient = ocr_client
+        self.student_manager: StudentManager = student_manager
+        self.question_manager: QuestionManager = question_manager
+        self.system_manager: SystemManager = system_manager
         self.upload_root = upload_root
         self.logger = logger
 
@@ -185,7 +189,11 @@ class HomeworkBatchProcessor:
         user_id: int,
     ) -> Dict[str, Any]:
         """解析单个作业文件，返回结构化结果。"""
-        ocr_response = await self.ocr_client.ocr_image_async(entry.stored_path, mode=OCR_MODE)
+        ocr_response = await self.ocr_client.ocr_image_async(
+            entry.stored_path, 
+            mode=OCR_MODE,
+            prompt="Free OCR.",
+        )
         pages = ocr_response.get("pages") or []
 
         markdown_segments: List[str] = []

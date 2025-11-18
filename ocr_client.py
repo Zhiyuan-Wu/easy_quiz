@@ -218,6 +218,7 @@ class DeepSeekOCRClient:
         *,
         mode: Literal["processed", "raw"] = "processed",
         output_dir: Optional[str | Path] = None,
+        prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute OCR on a single image or PDF page asynchronously.
 
@@ -225,7 +226,7 @@ class DeepSeekOCRClient:
             image_path: 输入图像或 PDF 文件路径。
             mode: 输出模式，`processed` 或 `raw`。
             output_dir: 可选的输出目录，用于保存裁剪图像。
-
+            prompt: 可选的提示词。
         Returns:
             OCR 结果字典，包括 markdown、images 以及分页详情。
 
@@ -239,7 +240,7 @@ class DeepSeekOCRClient:
 
         suffix = path_obj.suffix.lower()
         if suffix == ".pdf":
-            return await self._ocr_pdf_async(path_obj, mode=mode, output_dir=output_dir)
+            return await self._ocr_pdf_async(path_obj, mode=mode, output_dir=output_dir, prompt=prompt)
         if suffix not in {".png", ".jpg", ".jpeg"}:
             raise ValueError("Only PNG/JPG images or PDF documents are supported")
 
@@ -249,6 +250,7 @@ class DeepSeekOCRClient:
             suggested_suffix="",
             mode=mode,
             output_dir=output_dir,
+            prompt=prompt,
         )
         return {
             "request_id": page["request_id"],
@@ -266,6 +268,7 @@ class DeepSeekOCRClient:
         suggested_suffix: str,
         mode: Literal["processed", "raw"],
         output_dir: Optional[str | Path],
+        prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Submit a single image for OCR and format the response.
 
@@ -275,7 +278,7 @@ class DeepSeekOCRClient:
             suggested_suffix: 推荐的文件名后缀。
             mode: 输出模式。
             output_dir: 可选的裁剪图像输出目录。
-
+            prompt: 可选的提示词。
         Returns:
             单页 OCR 结果字典。
         """
@@ -285,7 +288,7 @@ class DeepSeekOCRClient:
             payload = {
                 "model": RAW_OCR_CONFIG["model"],
                 "image": [f"data:image/jpeg;base64,{image_data}"],
-                "prompt": RAW_OCR_CONFIG["prompt"],
+                "prompt": prompt or RAW_OCR_CONFIG["prompt"],
                 "max_tokens": RAW_OCR_CONFIG["max_tokens"],
                 "temperature": RAW_OCR_CONFIG["temperature"]
             }
@@ -358,6 +361,7 @@ class DeepSeekOCRClient:
         *,
         mode: Literal["processed", "raw"],
         output_dir: Optional[str | Path],
+        prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Perform OCR on each page of a PDF and merge the outputs.
 
@@ -365,7 +369,7 @@ class DeepSeekOCRClient:
             pdf_path: PDF 文件路径。
             mode: 输出模式。
             output_dir: 可选的输出目录。
-
+            prompt: 可选的提示词。
         Returns:
             聚合后的 OCR 结果字典。
         """
@@ -399,6 +403,7 @@ class DeepSeekOCRClient:
                     suggested_suffix=suggested_suffix,
                     mode=mode,
                     output_dir=output_dir,
+                    prompt=prompt,
                 )
                 page_markdown = page_result.get("markdown") or ""
                 page_images_data = page_result.get("images") or []
